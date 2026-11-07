@@ -1,0 +1,40 @@
+# --- 민감한 파일 ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials*.json
+*.token
+
+# --- Claude Code / 에디터 개인 설정 ---
+.claude/settings.local.json
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Python 임시 파일 ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- OS 임시 파일 ---
+.DS_Store
+Thumbs.db
+
+# --- 작업 중 임시 파일 ---
+*.tmp
+*.bak
+*.log
+tmp/
+# LLM이 만든 WOD 초안(검증·계산 입력용 중간 산출물). 승인본은 wods/에 저장되어 추적된다.
+drafts/

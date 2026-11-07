@@ -1,0 +1,155 @@
+{
+  "_meta": {
+    "description": "박스 보유 장비, 금지 동작, 공간 제약. check_equipment.py의 기준 데이터.",
+    "last_updated": "2026-11-07",
+    "null_means": "코치 미확인. 추측해서 채우지 말고 코치에게 확인한다.",
+    "units": "바벨·원판은 lb, 덤벨은 kg. by_weight_lb / by_weight_kg의 키가 무게다.",
+    "available_values": {
+      "true": "보유 확인",
+      "false": "미보유 확인 — 이 장비가 필요한 동작은 WOD에 넣지 않는다",
+      "null": "보유 여부 미확인 — 사용 시 '확인 필요' 경고"
+    },
+    "quantity_format": {
+      "shape": {"value": "숫자 또는 null", "precision": "exact | approx | unknown"},
+      "exact": "정확한 수량. 경고 없음",
+      "approx": "코치가 '약 N'으로 답한 추정 수량. 사용 시 '추정 수량' 경고",
+      "unknown": "보유는 하지만 수량 미확인('여러 개', '다수'). value는 null. 사용 시 '수량 미확인' 경고"
+    },
+    "source_values": {
+      "코치 확정": "코치가 직접 확인한 운영 사실",
+      "기획서": "기획서 본문에 사실로 명시됨 (코치 재확인 전)",
+      "기획서 예시": "기획서의 예시 WOD에만 등장. 규칙이 아니라 참고 사례"
+    },
+    "changelog": [
+      "2026-11-07: 성인 월볼 금지 제거, 월볼 보유로 변경 (코치 확정)",
+      "2026-11-07: 셔틀런 2레인·2인 1조 교대를 고정 규칙에서 예시(operational_examples)로 이동 (코치 확정)",
+      "2026-11-07: 장비 수량 입력, 수량 표기를 exact/approx/unknown으로 구분. 링은 '없음'(기획서) → '보유, 층고 제한'(코치 확정)으로 정정"
+    ],
+    "source_url": "https://gist.github.com/nsdictionary/36fa6d76c435011389a925ed4012ef3c"
+  },
+  "equipment": {
+    "rower": {
+      "available": true,
+      "count": {"value": 5, "precision": "exact"},
+      "source": "코치 확정",
+      "note": "로잉머신 5대"
+    },
+    "box": {
+      "available": true,
+      "count": {"value": 9, "precision": "exact"},
+      "heights_in": [20, 24],
+      "source": "코치 확정",
+      "note": "점프 박스 9개, 20/24 in 사용 가능"
+    },
+    "pullup_bar": {
+      "available": true,
+      "capacity_athletes": {"value": 8, "precision": "approx"},
+      "source": "코치 확정",
+      "note": "약 8명 동시 사용 가능"
+    },
+    "dumbbell": {
+      "available": true,
+      "by_weight_kg": {
+        "1":   {"value": null, "precision": "unknown"},
+        "1.5": {"value": null, "precision": "unknown"},
+        "2":   {"value": null, "precision": "unknown"},
+        "3":   {"value": 2, "precision": "exact"},
+        "4":   {"value": 2, "precision": "exact"},
+        "5":   {"value": 2, "precision": "exact"},
+        "6":   {"value": 2, "precision": "exact"},
+        "7":   {"value": 2, "precision": "exact"},
+        "8":   {"value": 2, "precision": "exact"},
+        "10":  {"value": null, "precision": "unknown"},
+        "15":  {"value": null, "precision": "unknown"},
+        "20":  {"value": null, "precision": "unknown"}
+      },
+      "source": "코치 확정",
+      "note": "값은 덤벨 낱개 수. 3~8kg은 무게별 2개(1쌍). 1/1.5/2/10/15/20kg은 여러 개 보유, 정확한 수량 미확인"
+    },
+    "barbell": {
+      "available": true,
+      "by_weight_lb": {
+        "45": {"value": 9, "precision": "exact"},
+        "35": {"value": 5, "precision": "exact"}
+      },
+      "source": "코치 확정",
+      "note": "45lb 바 9개, 35lb 바 5개"
+    },
+    "plate": {
+      "available": true,
+      "by_weight_lb": {
+        "10": {"value": 10, "precision": "approx"},
+        "15": {"value": 10, "precision": "approx"},
+        "25": {"value": 10, "precision": "approx"},
+        "35": {"value": 10, "precision": "approx"},
+        "45": {"value": 10, "precision": "approx"},
+        "55": {"value": 2, "precision": "exact"}
+      },
+      "source": "코치 확정",
+      "note": "10/15/25/35/45lb 각 약 10장, 55lb 2장. 값은 원판 낱장 수"
+    },
+    "wall_ball": {
+      "available": true,
+      "count": {"value": 20, "precision": "approx"},
+      "weights": null,
+      "source": "코치 확정",
+      "note": "약 20개, 다양한 무게(무게별 구성 미확인). 타깃 제약은 space.wall_target 참고"
+    },
+    "rings": {
+      "available": true,
+      "count": {"value": null, "precision": "unknown"},
+      "source": "코치 확정",
+      "note": "보유. 층고가 낮아 높은 공간이 필요한 동작(링 머슬업 등)은 제한 — space.ceiling 참고. 기획서의 '링 없음'은 정정됨"
+    },
+    "jump_rope": {
+      "available": true,
+      "count": {"value": null, "precision": "unknown"},
+      "source": "코치 확정",
+      "note": "보유, 정확한 수량 미확인"
+    },
+    "kettlebell": {
+      "available": true,
+      "by_weight_kg": null,
+      "count": {"value": null, "precision": "unknown"},
+      "source": "코치 확정",
+      "note": "다수 보유, 정확한 수량과 무게 미확인"
+    }
+  },
+  "banned_movements": [],
+  "space": {
+    "ceiling": {
+      "height_m": null,
+      "is_low": true,
+      "restricted_space_tags": ["high_ceiling"],
+      "source": "코치 확정",
+      "note": "층고가 낮음. movements.json에서 space_tags에 high_ceiling이 있는 동작(링 머슬업 등)은 WOD에 넣지 않고 대체를 제안한다. 정확한 층고 미확인"
+    },
+    "wall_target": {
+      "height_m": {"value": 2.3, "precision": "approx"},
+      "standard_target_available": false,
+      "source": "코치 확정",
+      "note": "월볼 타깃은 벽면 약 2.3m. 표준 높이 타깃 사용 불가 — 월볼 WOD에는 타깃 높이를 함께 표기하고 경고한다"
+    },
+    "shuttle_run": {
+      "one_way_m": 7.5,
+      "rep_distance_m": 15,
+      "capacity_athletes": {"value": 8, "precision": "approx"},
+      "source": "코치 확정",
+      "note": "1rep = 7.5m 왕복 = 15m. 약 8명 동시 수행 가능"
+    }
+  },
+  "operational_examples": [
+    {
+      "example": "셔틀런 6명 이상 동시 출발 시 2개 레인으로 분리",
+      "source": "기획서 예시",
+      "is_rule": false,
+      "note": "고정 규칙 아님. 인원과 WOD 구성에 따라 코치가 결정"
+    },
+    {
+      "example": "박스 12개 필요, 부족하면 2인 1조 교대",
+      "source": "기획서 예시",
+      "is_rule": false,
+      "note": "고정 규칙 아님. 부족 시 운영 방식은 WOD 구성에 따라 다르며 에이전트는 선택지를 제안만 한다"
+    }
+  ]
+}
