@@ -11,14 +11,17 @@ from render_wod import (
     STATUS_MARK,
     build,
     header_line,
+    footnote_line,
     missing_lines,
     movement_line,
     render_sections,
+    scale_line_gaps,
     whiteboard_text,
 )
 
 REAL_DRAFT = support.ROOT / "drafts" / "2026-11-09.json"
-LINE_RE = re.compile(r"^\d+(\.\d+)?m? [A-Z][A-Za-z\- ]+")   # "17 Shuttle Runs", "250m Row"
+LINE_RE = re.compile(r"^\d+(\.\d+)?m? [A-Z][A-Za-z0-9\- ]+")   # "17 Shuttle Runs", "250m Row", "8 T2B"
+SCALE_LINE_RE = re.compile(r"^[ABC] \d")                          # "A 10 Shuttle Runs / 8 T2B / ..."
 SCALES = {"A": [{"id": "toes_to_bar", "reps": 6}, {"id": "box_jump", "reps": 12, "load": "20 in"}],
           "B": [{"id": "hanging_knee_raise", "reps": 10}, {"id": "box_jump", "reps": 10, "load": "20 in"}],
           "C": [{"id": "v_up", "reps": 8}, {"id": "box_jump", "reps": 8, "load": "20 in"}]}
@@ -39,11 +42,33 @@ class MovementLineTest(unittest.TestCase):
     def test_units_load_weights_target(self):
         self.assertEqual(movement_line({"id": "row", "reps": 250}, self.data), "250m Row")
         self.assertEqual(movement_line({"id": "box_jump", "reps": 15, "load": "24/20 in"}, self.data),
-                         "15 Box Jumps (24/20 in)")
+                         '15 Box Jumps (24/20")')
         self.assertEqual(movement_line({"id": "dumbbell_snatch", "reps": 10, "weights": {"dumbbell": [15, 10]}},
                                        self.data), "10 Dumbbell Snatches (15/10 kg)")
         self.assertEqual(movement_line({"id": "wall_ball", "reps": 20}, self.data), "20 Wall Balls (target ~2.3m)")
         self.assertIsNone(movement_line({"id": "pegboard", "reps": 1}, self.data))
+
+    def test_load_other_than_inches_is_kept_as_is(self):
+        self.assertEqual(movement_line({"id": "box_jump", "reps": 10, "load": "60 cm"}, self.data), "10 Box Jumps (60 cm)")
+        self.assertEqual(movement_line({"id": "box_jump", "reps": 10, "load": "20in"}, self.data), '10 Box Jumps (20")')
+
+    def test_abbreviation_only_when_registered(self):
+        self.assertEqual(movement_line({"id": "toes_to_bar", "reps": 8}, self.data), "8 Toes-to-Bar")
+        self.assertEqual(movement_line({"id": "toes_to_bar", "reps": 8}, self.data, abbreviate=True), "8 T2B")
+        # 약어가 등록되지 않은 동작은 스케일에서도 이름 그대로 (지어내지 않음)
+        self.assertEqual(movement_line({"id": "hanging_knee_raise", "reps": 10}, self.data, abbreviate=True),
+                         "10 Hanging Knee Raises")
+        self.assertEqual(movement_line({"id": "kettlebell_swing", "reps": 15}, self.data, abbreviate=True),
+                         "15 Kettlebell Swings")
+
+    def test_shuttle_name_and_footnote_from_data(self):
+        self.assertEqual(movement_line({"id": "shuttle_run", "reps": 13}, self.data), "13 Shuttle Runs")
+        self.assertEqual(footnote_line("shuttle_run", self.data), "*1 Shuttle Run = 7.5m x 2")
+        self.assertIsNone(footnote_line("box_jump", self.data))
+        self.data["equipment"]["space"]["shuttle_run"]["one_way_m"] = None     # 왕복 정보 없으면 거리만
+        self.assertEqual(footnote_line("shuttle_run", self.data), "*1 Shuttle Run = 15m")
+        del self.data["equipment"]["space"]["shuttle_run"]                    # 근거 없으면 각주 없음
+        self.assertIsNone(footnote_line("shuttle_run", self.data))
 
     def test_headers(self):
         self.assertEqual(header_line({"format": "AMRAP", "duration_min": 15}), "WOD - AMRAP 15")
@@ -61,18 +86,70 @@ class CompletenessTest(unittest.TestCase):
         sections, errors = render_sections(base(), self.data)
         self.assertEqual(errors, [])
         self.assertEqual([s["name"] for s in sections], ["Rx", "Scale A", "Scale B", "Scale C"])
+        self.assertEqual(sections[0]["lines"], sections[0]["items"])           # Rx는 동작 한 줄씩
+        self.assertEqual(len(sections[0]["lines"]), 2)
         for s in sections:
-            self.assertEqual(len(s["lines"]), 2)
+            self.assertEqual(len(s["items"]), 2)
+            for it in s["items"]:
+                self.assertRegex(it, LINE_RE)
             for ln in s["lines"]:
-                self.assertRegex(ln, LINE_RE)
                 self.assertFalse(ln.rstrip().endswith(("/", "×", "+", ",")))
+        for s in sections[1:]:                                                 # 스케일은 레벨별 한 줄
+            self.assertEqual(s["lines"], [s["name"][-1] + " " + " / ".join(s["items"])])
+            self.assertRegex(s["lines"][0], SCALE_LINE_RE)
+        self.assertEqual(sections[1]["lines"], ['A 6 T2B / 12 Box Jumps (20")'])
+        self.assertEqual(scale_line_gaps(sections), [])
+
+    def test_whiteboard_layout(self):
+        d = base([{"id": "shuttle_run", "reps": 13}, {"id": "toes_to_bar", "reps": 12},
+                  {"id": "box_jump", "reps": 12, "load": "24/20 in"}], duration_min=15)
+        d["scales"] = {
+            "A": [{"id": "shuttle_run", "reps": 10}, {"id": "toes_to_bar", "reps": 8}, {"id": "box_jump", "reps": 10, "load": "20 in"}],
+            "B": [{"id": "shuttle_run", "reps": 10}, {"id": "hanging_knee_raise", "reps": 10}, {"id": "step_up", "reps": 12, "load": "20 in"}],
+            "C": [{"id": "shuttle_run", "reps": 7}, {"id": "v_up", "reps": 10}, {"id": "step_up", "reps": 10, "load": "20 in"}],
+        }
+        self.data["movements"]["movements"]["step_up"] = dict(self.data["movements"]["movements"]["box_jump"], display="Step-ups")
+        sections, errors = render_sections(d, self.data)
+        self.assertEqual(errors, [])
+        self.assertEqual(whiteboard_text(d, sections, self.data), "\n".join([
+            "WOD - AMRAP 15",
+            "",
+            "13 Shuttle Runs",
+            "12 Toes-to-Bar",
+            '12 Box Jumps (24/20")',
+            "",
+            "Scale",
+            "",
+            'A 10 Shuttle Runs / 8 T2B / 10 Box Jumps (20")',
+            'B 10 Shuttle Runs / 10 Hanging Knee Raises / 12 Step-ups (20")',
+            'C 7 Shuttle Runs / 10 V-ups / 10 Step-ups (20")',
+            "",
+            "*1 Shuttle Run = 7.5m x 2",
+        ]))
+
+    def test_scale_line_keeps_weights_distance_and_target(self):
+        d = base([{"id": "row", "reps": 250}, {"id": "wall_ball", "reps": 20},
+                  {"id": "dumbbell_snatch", "reps": 10, "weights": {"dumbbell": [15, 10]}}])
+        d["scales"] = {lv: [{"id": "row", "reps": 200}, {"id": "wall_ball", "reps": 15},
+                            {"id": "dumbbell_snatch", "reps": 8, "weights": {"dumbbell": [10, 7]}}] for lv in "ABC"}
+        sections, errors = render_sections(d, self.data)
+        self.assertEqual(errors, [])
+        line = sections[1]["lines"][0]
+        self.assertEqual(line, "A 200m Row / 15 Wall Balls (target ~2.3m) / 8 Dumbbell Snatches (10/7 kg)")
+        self.assertEqual(scale_line_gaps(sections), [])                        # 괄호 안 /는 구분자가 아님
+
+    def test_scale_line_gap_detected(self):
+        sections, _ = render_sections(base(), self.data)
+        sections[2]["lines"] = ["B 10 Hanging Knee Raises"]                    # 동작 하나 빠짐
+        self.assertEqual(len(scale_line_gaps(sections)), 1)
 
     def test_scale_missing_movement_is_error_and_not_filled(self):
         d = base()
         d["scales"]["C"] = [{"id": "v_up", "reps": 8}]          # Rx는 2개
         sections, errors = render_sections(d, self.data)
         self.assertEqual(codes(errors), ["scale_movement_count_mismatch"])
-        self.assertEqual(sections[-1]["lines"], ["8 V-ups"])     # 빠진 동작을 지어내지 않음
+        self.assertEqual(sections[-1]["items"], ["8 V-ups"])     # 빠진 동작을 지어내지 않음
+        self.assertEqual(sections[-1]["lines"], ["C 8 V-ups"])
 
     def test_adult_without_scales_is_error(self):
         d = base()
@@ -83,10 +160,20 @@ class CompletenessTest(unittest.TestCase):
     def test_truncated_copy_is_detected(self):
         d = base()
         sections, _ = render_sections(d, self.data)
-        full = whiteboard_text(d, sections)
+        full = whiteboard_text(d, sections, self.data)
         self.assertEqual(missing_lines(full, d, self.data), [])
-        truncated = full.replace("8 Box Jumps (20 in)", "8")
-        self.assertEqual(missing_lines(truncated, d, self.data), ["8 Box Jumps (20 in)"])
+        truncated = full.replace(' / 8 Box Jumps (20")', "")
+        self.assertEqual(missing_lines(truncated, d, self.data), ['C 8 V-ups / 8 Box Jumps (20")'])
+        expanded = full.replace("\nScale\n", "\n")                             # "Scale" 제목 누락도 검출
+        self.assertEqual(missing_lines(expanded, d, self.data), ["Scale"])
+
+    def test_missing_footnote_is_detected(self):
+        d = base([{"id": "shuttle_run", "reps": 13}, {"id": "box_jump", "reps": 15, "load": "24/20 in"}])
+        sections, _ = render_sections(d, self.data)
+        full = whiteboard_text(d, sections, self.data)
+        self.assertIn("*1 Shuttle Run = 7.5m x 2", full)
+        self.assertEqual(missing_lines(full.replace("*1 Shuttle Run = 7.5m x 2", ""), d, self.data),
+                         ["*1 Shuttle Run = 7.5m x 2"])
 
 
 class AutofixOutputTest(unittest.TestCase):
@@ -99,10 +186,12 @@ class AutofixOutputTest(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         sections, errors = render_sections(result["final_draft"], data)
         self.assertEqual(errors, [])
-        self.assertEqual(result["final_text"], whiteboard_text(result["final_draft"], sections))
+        self.assertEqual(result["final_text"], whiteboard_text(result["final_draft"], sections, data))
         self.assertNotIn("Row", result["final_text"])
-        self.assertIn("17 Shuttle Runs (15m = 1 rep)", result["final_text"])
-        self.assertEqual(result["final_text"].count("13 Shuttle Runs (15m = 1 rep)"), 3)
+        lines = result["final_text"].splitlines()
+        self.assertIn("17 Shuttle Runs", lines)
+        self.assertEqual(sum(ln.startswith(f"{lv} 13 Shuttle Runs / ") for lv in "ABC" for ln in lines), 3)
+        self.assertEqual(lines[-1], "*1 Shuttle Run = 7.5m x 2")
 
     def test_stale_autofix_report_is_not_shown(self):
         data = support.fixture_data()
@@ -151,8 +240,8 @@ class CliTest(unittest.TestCase):
         bad = Path(path).with_name("bad.txt")
         data = support.fixture_data()
         sections, _ = render_sections(base(), data)
-        good.write_text(whiteboard_text(base(), sections))
-        bad.write_text(whiteboard_text(base(), sections).replace("8 Box Jumps (20 in)", "8"))
+        good.write_text(whiteboard_text(base(), sections, data))
+        bad.write_text(whiteboard_text(base(), sections, data).replace(' / 8 Box Jumps (20")', ""))
         common = [path, "--data-dir", support.FIXTURE_DATA, "--total", "60",
                   "--block", "warmup=12", "--block", "boxing=15", "--block", "briefing=5",
                   "--block", "wod=18", "--block", "cooldown=10", "--interval", "boxing=4x3/1", "--json"]
@@ -161,7 +250,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual((code, report["result"]["text_check"]["complete"]), (0, True))
         code, out, _ = support.run_script("render_wod", *common, "--check-text", bad)
         self.assertEqual(code, 1)
-        self.assertEqual(json.loads(out)["result"]["text_check"]["missing_lines"], ["8 Box Jumps (20 in)"])
+        self.assertEqual(json.loads(out)["result"]["text_check"]["missing_lines"], ['C 8 V-ups / 8 Box Jumps (20")'])
 
     def test_block_without_total_is_input_error(self):
         path = support.write_temp_json(self, base())
@@ -180,11 +269,17 @@ class RealDraftTest(unittest.TestCase):
         self.assertEqual([e for e in errors if e["source"] == "render_wod"], [])
         text = result["whiteboard"]
         self.assertEqual(missing_lines(text, draft, data), [])
-        expected = len(draft["movements"]) + sum(len(v) for v in draft["scales"].values())
-        movement_lines = [ln for ln in text.splitlines() if LINE_RE.match(ln)]
-        self.assertEqual(len(movement_lines), expected)
+        lines = text.splitlines()
+        rx_lines = [ln for ln in lines if LINE_RE.match(ln)]
+        self.assertEqual(len(rx_lines), len(draft["movements"]))               # Rx는 한 번만
+        self.assertEqual(lines.count("Scale"), 1)
         for level in "ABC":
-            self.assertIn(f"Scale {level}", text.splitlines())
+            scale_lines = [ln for ln in lines if ln.startswith(f"{level} ")]
+            self.assertEqual(len(scale_lines), 1)                              # 레벨별 한 줄
+            self.assertEqual(scale_lines[0].count(" / "), len(draft["scales"][level]) - 1)
+        self.assertEqual(scale_line_gaps(result["sections"]), [])
+        if any(m["id"] == "shuttle_run" for m in draft["movements"]):
+            self.assertIn("*1 Shuttle Run = 7.5m x 2", lines)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
   },
   "movements": {
     "toes_to_bar": {
-      "display": "Toes-to-Bar", "unit": "rep",
+      "display": "Toes-to-Bar", "unit": "rep", "whiteboard": {"abbr": "T2B"},
       "time_estimate": {"sec_per_unit": {"low": 2, "high": 4}, "basis": "테스트용 가상 값", "updated": "2026-11-07"},
       "patterns": ["pull"], "equipment": ["pullup_bar"], "space_tags": [],
       "substitutes": [{"id": "hanging_knee_raise", "context": "Scale A"}, {"id": "v_up", "context": "Scale B"}]
@@ -24,6 +24,7 @@
     },
     "shuttle_run": {
       "display": "Shuttle Runs (15m = 1 rep)", "unit": "rep",
+      "whiteboard": {"name": "Shuttle Runs", "unit_label": "Shuttle Run"},
       "time_estimate": {"sec_per_unit": {"low": 8, "high": 12}, "basis": "테스트용 가상 값", "updated": "2026-11-07"},
       "patterns": ["cardio"], "equipment": [], "space_tags": [], "substitutes": []
     },

@@ -80,7 +80,8 @@
 - 설명, 경고, 시뮬레이션 근거는 한국어로 쓴다.
 - 바벨 무게는 **lb**, 덤벨 무게는 **kg**로 쓴다. [기획서]
 - 남/여 기준은 `24/20 in`처럼 슬래시로 구분한다. [기획서 예시]
-- 셔틀런은 `Shuttle Runs (15m = 1 rep)`처럼 1rep 거리를 표기한다. 1rep = 7.5m 왕복 = 15m. [코치 확정]
+- 셔틀런은 화이트보드에 `Shuttle Runs`로 쓰고, 끝에 `*1 Shuttle Run = 7.5m x 2` 각주로 1rep 거리를 표기한다. 1rep = 7.5m 왕복 = 15m. [코치 확정] (각주 숫자는 `equipment.json` `space.shuttle_run`에서 생성)
+- 스케일 A/B/C는 레벨마다 한 줄로 쓴다(`A 10 Shuttle Runs / 8 T2B / 10 Box Jumps (20")`). 동작을 생략하지 않는다. 약어는 `movements.json` `whiteboard.abbr`에 등록된 것만 쓴다. (2026-11-07 사용자 지시)
 
 ## 6. 장비·공간 규칙
 
@@ -119,13 +120,22 @@
 ## 8. 출력 형식 (기획서 결과물 예시를 기반으로)
 
 ```
-WOD - AMRAP 12
-10 Toes-to-Bar
-15 Box Jumps (24/20 in)
-20 Shuttle Runs (15m = 1 rep)
+WOD - AMRAP 15
+
+13 Shuttle Runs
+12 Toes-to-Bar
+12 Box Jumps (24/20")
+
+Scale
+
+A 10 Shuttle Runs / 8 T2B / 10 Box Jumps (20")
+B 10 Shuttle Runs / 10 Hanging Knee Raises / 12 Step-ups (20")
+C 7 Shuttle Runs / 10 V-ups / 10 Step-ups (20")
+
+*1 Shuttle Run = 7.5m x 2
 
 [시뮬레이션]
-- 본운동: AMRAP 12 → 12분 ≤ 30분 (검증됨)
+- 본운동: AMRAP 15 → 15분 ≤ 30분 (검증됨)
 - 라운드당: 추정 범위와 근거, 또는 "추정 불가: <없는 데이터>"
 - 장비: 필요 수량 vs 보유 수량, 미확인이면 "확인 필요", 부족 시 운영 선택지
 - 특이 회원: 대체 동작

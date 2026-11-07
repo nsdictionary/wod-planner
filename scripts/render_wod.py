@@ -5,9 +5,12 @@
 
 하는 일
   1) 화이트보드 텍스트를 초안 JSON에서 생성한다 (LLM이 손으로 옮겨 쓰지 않는다).
-     Rx와 Scale A/B/C의 모든 동작을 한 줄에 하나씩, 횟수·거리·load·무게·월볼 타깃과 함께 쓴다.
+     Rx는 한 번만, 동작 한 줄씩 쓴다. Scale A/B/C는 레벨마다 한 줄("A 10 Shuttle Runs / 8 T2B / ...")로 압축한다.
+     모든 동작에 횟수·거리·load·무게·월볼 타깃을 붙인다. 약어는 movements.json whiteboard.abbr에 등록된 것만
+     스케일 줄에 쓰고, 거리 단위 동작은 각주(*1 Shuttle Run = 7.5m x 2)를 equipment.json 공간 데이터로 만든다.
      스케일에 없는 동작이나 수치는 보충하지 않는다. 스케일 동작 수가 Rx와 다르면 오류로 알린다.
-  2) 생성한 텍스트가 초안의 모든 동작 줄을 포함하는지 다시 검사한다 (완전성 검사).
+  2) 생성한 텍스트가 초안의 모든 줄(Rx 동작, 스케일 한 줄, 각주)을 포함하는지,
+     스케일 한 줄을 다시 나눴을 때 동작 수·표기가 초안과 같은지 다시 검사한다 (완전성 검사).
   3) simulate · check_equipment(그리고 --total이 있으면 check_class)를 지금 실행해 검증 요약을 만든다.
      passed는 코드로 검사한 항목에만 쓴다. 자동 검증하지 않는 항목은 coach_review로 따로 둔다.
   4) --autofix-report가 있으면 자동 수정 전/후 상태와 수정 내역을 붙인다.
@@ -20,6 +23,7 @@
 import argparse
 import copy
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -76,16 +80,36 @@ def _weight_text(m, info, data):
     return parts
 
 
-def movement_line(m, data):
-    """동작 1개 → 화이트보드 한 줄. 미등록 동작이면 None."""
+INCH_RE = re.compile(r"^([0-9][0-9./ ]*?) ?in$")   # "24/20 in" → 24/20"
+SCALE_SEP = " / "
+
+
+def _wb(info):
+    return info.get("whiteboard") or {}
+
+
+def _load_text(load):
+    """load 문자열 표기. 'N in'만 N"로 줄이고 나머지는 그대로 둔다."""
+    m = INCH_RE.match(load.strip())
+    return f'{m.group(1)}"' if m else load
+
+
+def movement_line(m, data, abbreviate=False):
+    """동작 1개 → 화이트보드 표기. 미등록 동작이면 None.
+
+    abbreviate=True(스케일 한 줄)면 movements.json whiteboard.abbr가 등록된 동작만 약어로 쓴다.
+    약어가 없으면 이름을 그대로 쓴다 (약어를 지어내지 않는다).
+    """
     info = data["movements"]["movements"].get(m["id"])
     if info is None:
         return None
+    wb = _wb(info)
+    name = (abbreviate and wb.get("abbr")) or wb.get("name") or info["display"]
     reps = fmt_num(m["reps"])
-    head = f"{reps}m {info['display']}" if info["unit"] == "m" else f"{reps} {info['display']}"
+    head = f"{reps}m {name}" if info["unit"] == "m" else f"{reps} {name}"
     extras = []
     if m.get("load"):
-        extras.append(m["load"])
+        extras.append(_load_text(m["load"]))
     elif m.get("weights"):
         extras += _weight_text(m, info, data)
     if "wall_target" in (info.get("space_tags") or []):
@@ -93,6 +117,23 @@ def movement_line(m, data):
         if h.get("value") is not None:
             extras.append(f"target {'~' if h.get('precision') == 'approx' else ''}{fmt_num(h['value'])}m")
     return head + "".join(f" ({x})" for x in extras)
+
+
+def footnote_line(mid, data):
+    """rep 단위 거리 동작의 각주 (예: *1 Shuttle Run = 7.5m x 2). 근거 데이터가 없으면 None."""
+    info = data["movements"]["movements"].get(mid) or {}
+    label = _wb(info).get("unit_label")
+    sp = data["equipment"].get("space", {}).get(mid)
+    if not label or not isinstance(sp, dict):
+        return None
+    one_way, dist = sp.get("one_way_m"), sp.get("rep_distance_m")
+    if isinstance(one_way, (int, float)) and isinstance(dist, (int, float)) and one_way > 0:
+        legs = dist / one_way
+        if legs == int(legs):
+            return f"*1 {label} = {fmt_num(one_way)}m x {int(legs)}"
+    if isinstance(dist, (int, float)):
+        return f"*1 {label} = {fmt_num(dist)}m"
+    return None
 
 
 def header_line(draft):
@@ -110,7 +151,11 @@ def header_line(draft):
 
 
 def render_sections(draft, data):
-    """→ (sections, errors). section = {"name", "lines", "expected"(동작 수)}"""
+    """→ (sections, errors).
+
+    section = {"name", "items"(동작별 표기), "lines"(화이트보드 줄), "expected"(동작 수)}
+    Rx는 동작 한 줄씩, Scale A/B/C는 "A 10 Shuttle Runs / 8 T2B / ..." 한 줄로 압축한다.
+    """
     errors, sections = [], []
     groups = [("Rx", None, draft["movements"])]
     for level in SCALE_LEVELS:
@@ -118,21 +163,22 @@ def render_sections(draft, data):
             groups.append((f"Scale {level}", level, draft["scales"][level]))
     rx_count = len(draft["movements"])
     for name, level, movements in groups:
-        lines = []
+        items = []
         for i, m in enumerate(movements):
-            line = movement_line(m, data)
-            if line is None:
+            text = movement_line(m, data, abbreviate=level is not None)
+            if text is None:
                 errors.append(issue("render_unregistered",
                                     f"{name} {i + 1}번째 동작 '{m['id']}'는 미등록이라 화이트보드 이름을 만들 수 없습니다.",
                                     section=name, index=i))
                 continue
-            lines.append(line)
+            items.append(text)
         if level is not None and len(movements) != rx_count:
             errors.append(issue("scale_movement_count_mismatch",
                                 f"{name}의 동작 수 {len(movements)}개가 Rx 동작 수 {rx_count}개와 다릅니다. "
                                 f"빠진 동작을 임의로 채우지 않았으니 초안 scales.{level}를 고쳐야 합니다.",
                                 section=name, expected=rx_count, actual=len(movements)))
-        sections.append({"name": name, "lines": lines, "expected": len(movements)})
+        lines = items if level is None else [f"{level} " + SCALE_SEP.join(items)] if items else []
+        sections.append({"name": name, "items": items, "lines": lines, "expected": len(movements)})
     if draft.get("group", "adult") == "adult":
         missing = [lv for lv in SCALE_LEVELS if lv not in (draft.get("scales") or {})]
         if missing:
@@ -142,22 +188,74 @@ def render_sections(draft, data):
     return sections, errors
 
 
-def whiteboard_text(draft, sections):
-    out = [header_line(draft)]
-    for s in sections:
-        if s["name"] != "Rx":
-            out += ["", s["name"]]
-        out += s["lines"]
+def footnotes(draft, data):
+    ids = [m["id"] for m in draft["movements"]] + \
+        [m["id"] for lv in SCALE_LEVELS for m in (draft.get("scales") or {}).get(lv) or []]
+    out = []
+    for mid in dict.fromkeys(ids):
+        note = footnote_line(mid, data)
+        if note and note not in out:
+            out.append(note)
+    return out
+
+
+def whiteboard_text(draft, sections, data):
+    out = [header_line(draft), ""]
+    out += next((s["lines"] for s in sections if s["name"] == "Rx"), [])
+    scale_lines = [ln for s in sections if s["name"] != "Rx" for ln in s["lines"]]
+    if scale_lines:
+        out += ["", "Scale", ""] + scale_lines
+    notes = footnotes(draft, data)
+    if notes:
+        out += [""] + notes
     return "\n".join(out)
 
 
+def _split_scale_line(line):
+    """'A x / y (24/20") / z' → ['x', 'y (24/20")', 'z']. 괄호 안의 /는 구분자로 보지 않는다."""
+    parts, depth, cur = [], 0, ""
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        depth += ch == "("
+        depth -= ch == ")"
+        if depth == 0 and line.startswith(SCALE_SEP, i):
+            parts.append(cur)
+            cur, i = "", i + len(SCALE_SEP)
+            continue
+        cur += ch
+        i += 1
+    parts.append(cur)
+    return parts
+
+
 def missing_lines(text, draft, data):
-    """text에 없는 화이트보드 줄 목록. 각 동작 줄이 한 줄 전체로 들어 있어야 한다."""
+    """text에 없는 화이트보드 줄 목록. 각 줄(Rx 동작 줄, 스케일 한 줄, 각주)이 한 줄 전체로 들어 있어야 한다."""
     sections, _ = render_sections(draft, data)
     have = {ln.strip() for ln in text.splitlines()}
-    expected = [header_line(draft)] + [s["name"] for s in sections if s["name"] != "Rx"] + \
-        [ln for s in sections for ln in s["lines"]]
+    expected = [header_line(draft)] + [ln for s in sections if s["name"] == "Rx" for ln in s["lines"]]
+    if any(s["name"] != "Rx" for s in sections):
+        expected.append("Scale")
+    expected += [ln for s in sections if s["name"] != "Rx" for ln in s["lines"]]
+    expected += footnotes(draft, data)
     return [ln for ln in expected if ln not in have]
+
+
+def scale_line_gaps(sections):
+    """스케일 한 줄을 다시 나눠 동작 수·표기가 초안과 같은지 검사한다 → 문제 설명 목록."""
+    gaps = []
+    for s in sections:
+        if s["name"] == "Rx" or not s["lines"]:
+            continue
+        level = s["name"].split()[-1]
+        line = s["lines"][0]
+        if not line.startswith(f"{level} "):
+            gaps.append(f"{s['name']} 줄이 '{level} '로 시작하지 않습니다.")
+            continue
+        parts = _split_scale_line(line[len(level) + 1:])
+        if parts != s["items"]:
+            gaps.append(f"{s['name']} 한 줄의 동작 {len(parts)}개가 초안 동작 표기 {len(s['items'])}개와 다릅니다.")
+    return gaps
 
 
 # ---------------------------------------------------------------- 검증 요약
@@ -232,7 +330,7 @@ def verification_summary(sim, eq, render_errors, class_report=None):
 
     checks.append(_item("화이트보드 출력 완전성 (Rx·스케일 모든 동작)", "failed" if render_errors else "passed",
                         SCRIPT, " / ".join(e["message"] for e in render_errors) if render_errors
-                        else "초안의 모든 동작이 이름·횟수·표기와 함께 출력됐습니다."))
+                        else "초안의 모든 동작이 이름·횟수·표기와 함께 출력됐습니다 (Rx 동작별 한 줄, 스케일 레벨별 한 줄)."))
 
     if class_report is None:
         checks.append(_item("수업 시간 합계", "not_checked", "check_class", "수업 구성 인자(--total, --block)가 없습니다."))
@@ -305,11 +403,14 @@ def build(draft, data, class_report=None, autofix_report=None, check_text=None):
     sim = make_report("simulate", *simulate(d, data))
     eq = make_report("check_equipment", *check_equipment(d, data))
     sections, render_errors = render_sections(d, data)
-    text = whiteboard_text(d, sections)
-    # 생성한 텍스트를 다시 검사한다 (생성 로직 오류 방지)
+    text = whiteboard_text(d, sections, data)
+    # 생성한 텍스트를 다시 검사한다 (생성 로직 오류 방지): 줄 단위 + 스케일 한 줄의 동작 단위
     gaps = missing_lines(text, d, data)
     if gaps:
         render_errors.append(issue("render_incomplete", f"생성한 텍스트에 빠진 줄이 있습니다: {gaps}", missing=gaps))
+    scale_gaps = scale_line_gaps(sections)
+    if scale_gaps:
+        render_errors.append(issue("render_scale_incomplete", " ".join(scale_gaps), problems=scale_gaps))
 
     warnings = []
     af = None

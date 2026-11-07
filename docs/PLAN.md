@@ -236,7 +236,7 @@ WOD - AMRAP 12
 | `save_wod.py` | 초안 JSON 또는 텍스트, `--approved` | `wods/<date>.txt` 생성 | `--approved` 없음, 파일 이미 존재 |
 | `autofix.py` (3.5) | 초안 JSON, `--out`, `--max-attempts 3` | `status`(passed/needs_coach/unresolved/input_error), 수정 내역 `changes[]`, 검증 이력 `history[]`, 최종 초안·최종 두 보고서, 남은 문제별 `unresolved_reason`·후보 검토·운영 선택지 근거 | 남은 문제 있으면 1, 초안 구조 오류 2, `--out`이 `wods/` 안이면 2 |
 | `check_class.py` (3.5, 3.6) | `--total`, `--block KIND=분[:이름]`(순서대로), `--require`, `--interval KIND=라운드x운동분[/휴식분][+]`, `--wod 초안` | 블록 시간표(시작–끝), 합계, WOD 블록 vs 본운동, 인터벌 타임라인 | 합계 ≠ 수업 시간, 필수 블록 없음, WOD 블록 < 본운동, 본운동 시간 검증 실패, 인터벌 합계 ≠ 블록 시간. 복싱 블록에 인터벌이 없으면 경고 |
-| `render_wod.py` (3.6) | 초안 JSON, 수업 인자(선택), `--autofix-report`, `--check-text` | 화이트보드 텍스트(초안에서 생성), `checks[]`(item·status·source·detail), `coach_review[]`, 자동 수정 전후, 시간표 | 출력 불완전(스케일 동작 수 ≠ Rx, 스케일 없음, 미등록 동작), 검증 오류, 옮겨 쓴 텍스트에 빠진 줄 |
+| `render_wod.py` (3.6) | 초안 JSON, 수업 인자(선택), `--autofix-report`, `--check-text` | 화이트보드 텍스트(초안에서 생성. Rx 동작별 한 줄, Scale A/B/C 레벨별 한 줄, 각주), `checks[]`(item·status·source·detail), `coach_review[]`, 자동 수정 전후, 시간표 | 출력 불완전(스케일 동작 수 ≠ Rx, 스케일 없음, 미등록 동작, 스케일 한 줄의 동작 수 ≠ 초안), 검증 오류, 옮겨 쓴 텍스트에 빠진 줄 |
 
 공통: `--json` 옵션으로 기계 판독 출력, 기본은 한국어 사람용 출력. `--data-dir`로 데이터 디렉터리 교체.
 

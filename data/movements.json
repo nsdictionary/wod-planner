@@ -13,7 +13,8 @@
       "rx_standard": "기획서 예시에 나온 Rx 기준 표기. 고정 규격 아님. 없으면 null",
       "substitutes": "대체 동작 id와 사용 상황 (기획서 예시 기준)",
       "source": "기획서 = 본문 명시, 기획서 예시 = 예시 WOD에 등장, 코치 확정 = 코치가 직접 언급",
-      "space_tags": "필요한 공간 조건. equipment.json space.ceiling.restricted_space_tags에 걸리면 사용 불가, wall_target이면 타깃 높이 경고"
+      "space_tags": "필요한 공간 조건. equipment.json space.ceiling.restricted_space_tags에 걸리면 사용 불가, wall_target이면 타깃 높이 경고",
+      "whiteboard": "선택. 화이트보드 표기 보조 — name = display 대신 쓸 짧은 이름, abbr = 스케일 한 줄에 쓰는 약어(널리 쓰는 약어만 등록), unit_label = 각주에 쓰는 단수 이름. 없으면 display를 그대로 쓴다"
     },
     "time_estimate_format": {
       "sec_per_unit": {
@@ -34,6 +35,7 @@
   "movements": {
     "toes_to_bar": {
       "display": "Toes-to-Bar",
+      "whiteboard": {"abbr": "T2B"},
       "unit": "rep",
       "unit_note": null,
       "time_estimate": null,
@@ -125,6 +127,7 @@
     },
     "shuttle_run": {
       "display": "Shuttle Runs (15m = 1 rep)",
+      "whiteboard": {"name": "Shuttle Runs", "unit_label": "Shuttle Run"},
       "unit": "rep",
       "unit_note": "7.5m 왕복 = 15m = 1rep (data/equipment.json space.shuttle_run, 코치 확정)",
       "time_estimate": null,

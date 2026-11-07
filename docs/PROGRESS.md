@@ -3,7 +3,7 @@
 > 모든 에이전트는 작업 시작 전 이 파일을 읽고, 작업 후 갱신한다.
 > 상태 표기: ✅ 완료(코드·테스트로 확인됨) / 🚧 진행 중 / ⬜ 미착수
 
-## 현재 단계: Phase 4 준비 — Phase 3.6(복싱 인터벌 검증·최종 출력 생성) 완료 (2026-11-07)
+## 현재 단계: Phase 4 준비 — Phase 3.7(화이트보드 간결 형식) 완료 (2026-11-07)
 
 Phase 순서 변경(2026-11-07, 사용자 지시): Skill을 먼저 구현(Phase 3)하고, `recent_wods.py`·`save_wod.py`는 Phase 4로 미뤘다.
 `wod-planner` Skill이 새 Claude Code 세션에서 발견되고, 자연어 요청 1건으로 초안 작성 → 두 검증 스크립트 → 보고 → 승인 대기까지 동작함을 확인했다.
@@ -18,6 +18,7 @@ Phase 순서 변경(2026-11-07, 사용자 지시): Skill을 먼저 구현(Phase 
 | 3 | `.claude/skills/wod-planner/SKILL.md` + `.claude/settings.json` | ✅ Skill 발견·자연어 1건 E2E 확인 (시나리오 S1). S2–S6 미실행 |
 | 3.5 | `scripts/autofix.py`, `scripts/check_class.py`, 스케일 A/B/C·`max_workout_min` 검증 + Skill 절차 갱신 (사용자 지시로 Post-MVP 일부를 앞당김) | ✅ 테스트 108개 통과(기존 67 + 신규 41), 실제 data/로 자동 수정 1건 확인. 새 Skill 절차 E2E는 미실행 |
 | 3.6 | `check_class.py --interval`(복싱 라운드·휴식 시간), `scripts/render_wod.py`(초안 → 화이트보드·검증 요약·코치 확인 항목), autofix `final_text` | ✅ 테스트 131개 통과(기존 108 + 신규 23), 실제 초안 출력 완전성 테스트 포함. 실행 권한은 settings.json·Skill `allowed-tools` 양쪽에 반영됨(사용자 추가) |
+| 3.7 | 화이트보드 간결 형식(Rx 1회, Scale A/B/C 레벨별 한 줄, 등록 약어만, 셔틀런 각주) + 한 줄 스케일 완전성 검사 | ✅ 테스트 138개 통과(기존 131 + 신규 7) |
 | 4 | `scripts/recent_wods.py`, `scripts/save_wod.py` + 테스트 + 시나리오 S1–S6 | ⬜ 다음 단계 |
 | 5 | Post-MVP (키즈, 장비 회전, 패턴 판정, 결과 보정) | ⬜ |
 
@@ -117,6 +118,15 @@ Phase 순서 변경(2026-11-07, 사용자 지시): Skill을 먼저 구현(Phase 
 - 복싱 드릴은 시간 구조만 검증한다. 라운드별 드릴 내용과 라운드 수가 맞는지는 LLM이 지킨다.
 - 새 Skill 절차의 새 세션 E2E는 아직 실행하지 않았다.
 
+## Phase 3.7 구현 결과 (2026-11-07, 사용자 지시)
+- **출력 형식:** 헤더 → 빈 줄 → Rx 동작 한 줄씩(1회만) → `Scale` → Scale A/B/C 레벨별 한 줄(`A 10 Shuttle Runs / 8 T2B / 10 Box Jumps (20")`) → 각주(`*1 Shuttle Run = 7.5m x 2`).
+- **이름·약어:** `data/movements.json`에 선택 필드 `whiteboard`(`name`, `abbr`, `unit_label`) 추가. 등록 값은 `toes_to_bar.abbr = T2B`, `shuttle_run.name = Shuttle Runs`, `shuttle_run.unit_label = Shuttle Run`뿐이다. 약어는 스케일 줄에만 쓰고, 등록되지 않은 동작은 `display` 그대로 쓴다. 수치 데이터는 바꾸지 않았다.
+- **표기:** load가 `N in`이면 `N"`로 바꾸고, 그 밖의 load(`60 cm` 등)는 그대로 둔다. 셔틀런 각주 숫자는 `equipment.json` `space.shuttle_run`(`one_way_m`, `rep_distance_m`)에서 만든다. 근거가 없으면 각주를 쓰지 않는다.
+- **완전성 검사:** `missing_lines`는 헤더·Rx 줄·`Scale`·스케일 한 줄·각주를 줄 단위로 비교한다. 새 `scale_line_gaps`는 스케일 줄을 ` / `(괄호 밖)로 다시 나눠 초안 동작 표기와 같은지 검사한다. 다르면 `render_scale_incomplete` 오류다. `--check-text`도 새 형식 기준이다.
+- **유지:** autofix·simulate·check_equipment·check_class 로직은 바꾸지 않았다. autofix `final_text`가 새 형식으로 생성된다.
+- **문서:** SKILL.md(규칙 8, §5.1, §6), rules.md §5·§8, README, PLAN 표 갱신.
+- **한계:** 이름은 `display` 기준이라 예시의 단수형(`Box Jump`, `Step Up`)과 다르게 복수형(`Box Jumps`, `Step-ups`)으로 나온다. 바꾸려면 `whiteboard.name`을 코치가 정해 등록한다.
+
 ## 다음 할 일 — Phase 4
 0. (Phase 3.6 마무리) 새 세션에서 수업안 포함 요청으로 Skill E2E 확인 (실행 권한은 반영 완료).
 1. `scripts/recent_wods.py`: `wods/`에서 기준 날짜 이전 7일(`rules.md` `recent_days`) WOD 파일 조회, 헤더 파싱, 날짜 정렬.
@@ -157,4 +167,5 @@ Phase 순서 변경(2026-11-07, 사용자 지시): Skill을 먼저 구현(Phase 
 - 2026-11-07: **Phase 2 완료**. `scripts/common.py`·`check_equipment.py`·`simulate.py` 구현, 테스트 67개 통과(`tests/fixtures/`에만 가상 시간 값). 종료 코드 0/1/2·공통 JSON 형식 확정. 초안 선택 필드(`group`, `weights`, `units_per_athlete`, `concurrent_athletes`) 추가(PLAN §4.3). `data/` 변경 없음. Skill·커밋 미진행.
 - 2026-11-07: **Phase 3 완료** (Phase 순서 변경: Skill 먼저). `.claude/skills/wod-planner/SKILL.md`, `.claude/settings.json` 추가. 새 헤드리스 세션에서 Skill 발견·자연어 E2E(초안→검증 2종→보고→승인 대기) 확인, `wods/` 미생성. deny 규칙 실동작은 미검증. PLAN §6·§7, CLAUDE.md, AGENTS.md, README 갱신. 커밋 미진행.
 - 2026-11-07: **Phase 3.5 완료** (사용자 지시로 Post-MVP 일부 앞당김). `autofix.py`(최대 3회 자동 수정·재검증), `check_class.py`(수업 시간 검증), 스케일 A/B/C·`max_workout_min` 검증, check_equipment issue 위치 정보. Skill §3·§5·§7 갱신, AGENTS·PLAN·rules.md 범위 문구 갱신. 테스트 108개 통과. settings.json 권한 추가 실패(분류기 거부), 새 절차 E2E 미실행. 커밋 미진행.
+- 2026-11-07: **Phase 3.7 완료**. 화이트보드 간결 형식(Rx 1회, 스케일 레벨별 한 줄, T2B 약어·셔틀런 각주는 데이터 등록분만), 한 줄 스케일 완전성 검사. 테스트 138개 통과. 커밋 미진행.
 - 2026-11-07: **Phase 3.6 완료**. 복싱 인터벌 시간 검증(`check_class.py --interval`), `render_wod.py`(초안 → 화이트보드·검증 요약·코치 확인 분리·출력 완전성 검사), autofix `final_text`. 출력 잘림은 JSON 누락이 아니라 표시·복사 단계로 판단, 화이트보드를 코드 생성으로 전환. 테스트 131개 통과. render_wod 실행 권한은 사용자가 settings.json·Skill에 추가.

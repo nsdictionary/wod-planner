@@ -442,7 +442,7 @@ def autofix(draft, data, max_attempts=DEFAULT_MAX_ATTEMPTS):
         # 최종 초안에서 화이트보드 텍스트를 생성한다 (수정 후 출력이 초안과 일치하도록)
         from render_wod import render_sections, whiteboard_text
         sections, _ = render_sections(current, data)
-        final_text = whiteboard_text(current, sections)
+        final_text = whiteboard_text(current, sections, data)
 
     result = {
         "final_text": final_text,

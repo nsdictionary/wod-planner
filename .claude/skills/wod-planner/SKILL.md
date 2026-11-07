@@ -22,7 +22,7 @@ allowed-tools: Read, Glob, Bash(python3 scripts/autofix.py:*), Bash(python3 scri
 5. **쓸 수 없는 동작은 넣지 않는다.** 미보유 장비(`available: false`), 금지 동작(`banned_movements`, 그룹별), 층고 제한(`space_tags`에 `high_ceiling` — 링 머슬업 등)이 걸린 동작. 코치가 직접 요청해도 이유를 설명하고 대체 동작을 제안한다. 스케일 동작도 같다.
 6. **경고를 숨기지 않는다.** 스크립트 경고와 자동 수정 내역은 모두 코치에게 전달한다.
 7. **실행하지 않은 검증을 통과로 보고하지 않는다.** 보고하는 모든 결과는 이번 턴에 실제로 실행한 스크립트 출력에서 온다. 스크립트가 실행되지 않았거나 exit 2면 "검증하지 못함"이라고 쓴다. `passed`는 `render_wod.py` 검증 요약에서 `passed`인 항목에만 쓴다.
-8. **화이트보드 WOD를 손으로 쓰지 않는다.** Rx·Scale A/B/C 텍스트는 `render_wod.py`가 초안 JSON에서 만든 `whiteboard`를 그대로 붙인다. 줄을 합치거나(`/`로 잇기) 줄이거나 바꾸지 않는다.
+8. **화이트보드 WOD를 손으로 쓰지 않는다.** Rx·Scale A/B/C 텍스트는 `render_wod.py`가 초안 JSON에서 만든 `whiteboard`를 그대로 붙인다. 스케일 한 줄(`A ... / ... / ...`)은 스크립트가 만든 형식이다. 네가 줄을 합치거나 나누거나 줄이거나 약어를 바꾸지 않는다.
 
 ## 0. 요청 범위 판단
 
@@ -146,7 +146,23 @@ python3 scripts/render_wod.py drafts/<date>.json --autofix-report drafts/<date>.
     [수업안이면 --total 60 --block ... --interval boxing=4x3/1 --require boxing] --json
 ```
 
-- `result.whiteboard`: 화이트보드 텍스트. Rx와 Scale A/B/C의 **모든 동작을 한 줄에 하나씩** 횟수·거리·load·무게·월볼 타깃과 함께 담는다. 스케일 동작 수가 Rx와 다르거나 스케일이 없으면 오류(`scale_movement_count_mismatch` / `scale_missing`)이고, 빠진 동작을 채우지 않는다 → 네가 초안 `scales`를 고치고 autofix부터 다시.
+- `result.whiteboard`: 화이트보드 텍스트(간결 형식). **Rx는 한 번만, 동작 한 줄씩** 쓴다. **Scale A/B/C는 레벨마다 한 줄**로 `A 10 Shuttle Runs / 8 T2B / 10 Box Jumps (20")`처럼 모든 동작을 ` / `로 잇는다. 모든 동작에 횟수·거리·load·무게·월볼 타깃이 붙는다. `N in` load는 `N"`로 표기한다. 약어는 `data/movements.json`의 `whiteboard.abbr`에 등록된 것만 스케일 줄에 쓴다(현재 T2B). 거리 단위 rep 동작은 끝에 각주(`*1 Shuttle Run = 7.5m x 2`)가 붙는다. 형식 예:
+  ```
+  WOD - AMRAP 15
+
+  13 Shuttle Runs
+  12 Toes-to-Bar
+  12 Box Jumps (24/20")
+
+  Scale
+
+  A 10 Shuttle Runs / 8 T2B / 10 Box Jumps (20")
+  B 10 Shuttle Runs / 10 Hanging Knee Raises / 12 Step-ups (20")
+  C 7 Shuttle Runs / 10 V-ups / 10 Step-ups (20")
+
+  *1 Shuttle Run = 7.5m x 2
+  ```
+  스케일 동작 수가 Rx와 다르거나 스케일이 없으면 오류(`scale_movement_count_mismatch` / `scale_missing`)이고, 빠진 동작을 채우지 않는다. 스케일 한 줄을 다시 나눠 동작 수가 초안과 다르면 `render_scale_incomplete` 오류다 → 네가 초안 `scales`를 고치고 autofix부터 다시.
 - `result.checks[]`: `{item, status, source, detail}`. status = `passed` / `passed_with_warnings` / `estimated` / `failed` / `shortage` / `not_checked` / `not_estimable`. 보고서의 "검증 요약"은 이 목록만으로 쓴다.
 - `result.coach_review[]`: 자동 검증하지 않는 항목(운동 자극, 스케일 난도, 준비운동·마무리 내용, 복싱 드릴 품질, 거리 환산 적절성). "코치 확인 필요"로 따로 보여 준다. 여기 항목을 passed라고 쓰지 않는다.
 - `result.autofix`: 수정 전/후 상태(`before`/`after`의 exit 코드·문제)와 `changes`. 보고서의 final_draft가 지금 초안과 다르면 `autofix_report_mismatch` 경고가 나오고 전후 비교가 빠진다 → autofix를 다시 실행.
@@ -194,8 +210,8 @@ python3 scripts/render_wod.py drafts/<date>.json --autofix-report drafts/<date>.
 ````
 
 - 시간·장비 섹션의 숫자는 모두 스크립트 JSON에서 온 것이어야 한다.
-- 월볼 타깃 높이는 render_wod가 화이트보드 줄에 자동으로 붙인다.
-- 응답 문장은 한 항목에 한 문장씩 끝까지 쓴다. 긴 목록을 한 줄에 `/`로 잇지 않는다(터미널에서 줄바꿈·잘림이 생기기 쉽다).
+- 월볼 타깃 높이·셔틀런 각주는 render_wod가 화이트보드에 자동으로 붙인다.
+- 응답 문장은 한 항목에 한 문장씩 끝까지 쓴다. 긴 목록을 한 줄에 `/`로 잇지 않는다(터미널에서 줄바꿈·잘림이 생기기 쉽다). 예외: `whiteboard` 블록 안의 스케일 한 줄은 스크립트 출력 그대로 둔다.
 - 수업 전체안을 요청받았으면 §7의 수업안을 WOD 보고 앞에 붙인다.
 - **보고 후 멈추고 코치 답을 기다린다.** 승인 없이 다음 단계로 가지 않는다.
 
