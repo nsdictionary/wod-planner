@@ -388,11 +388,28 @@ def autofix_section(autofix_report, draft):
         v = h["validation"]
         return {"simulate_exit": v["simulate"]["exit_code"], "check_equipment_exit": v["check_equipment"]["exit_code"],
                 "problems": h.get("problems") or []}
-    return {"status": r.get("status"), "attempts_used": r.get("attempts_used"), "max_attempts": r.get("max_attempts"),
-            "validation_runs": r.get("validation_runs"),
-            "before": state(hist[0]) if hist else None, "after": state(hist[-1]) if hist else None,
-            "changes": [{"reason": c["reason"], "reps_note": c.get("reps_note"), "note": c.get("note"),
-                         "scale_changes": c.get("scale_changes") or []} for c in r.get("changes") or []]}, []
+    def change(c):
+        return {"reason": c["reason"], "reps_note": c.get("reps_note"), "note": c.get("note"),
+                "scale_changes": c.get("scale_changes") or [], "run": c.get("run")}
+    section = {"status": r.get("status"), "attempts_used": r.get("attempts_used"), "max_attempts": r.get("max_attempts"),
+               "validation_runs": r.get("validation_runs"),
+               "before": state(hist[0]) if hist else None, "after": state(hist[-1]) if hist else None,
+               "changes": [change(c) for c in r.get("changes") or []], "cumulative": None}
+    lg = r.get("ledger")
+    warnings = []
+    if lg:
+        # 누적 이력: 재검증으로 이번 실행 수정이 0회여도 이전 실행의 수정 전 상태·수정 내역을 보여 준다
+        section["cumulative"] = {"runs": lg["runs"], "attempts_total": lg["attempts_total"],
+                                 "chain_intact": lg["chain_intact"],
+                                 "manual_edits_between_runs": lg.get("manual_edits_between_runs") or []}
+        section["before"] = lg.get("first_before") or section["before"]
+        section["after"] = lg.get("last_after") or section["after"]
+        section["changes"] = [change(c) for c in lg.get("changes") or []]
+        if not lg["chain_intact"]:
+            warnings.append(issue("autofix_history_manual_edit",
+                                  f"자동 수정 실행 {lg['manual_edits_between_runs']} 앞에서 초안이 손으로 바뀌었습니다. "
+                                  "수정 전/후 비교는 최초 초안 기준이며 그 사이 수동 변경은 포함하지 않습니다."))
+    return section, warnings
 
 
 # ---------------------------------------------------------------- 실행
@@ -471,12 +488,18 @@ def render_text(report):
         out.append("")
     if r.get("autofix"):
         a = r["autofix"]
-        out.append(f"[자동 수정 — {a['status']}, 수정 {a['attempts_used']}/{a['max_attempts']}회, 검증 실행 {a['validation_runs']}회]")
+        cum = a.get("cumulative")
+        if cum:
+            out.append(f"[자동 수정 — {a['status']}, 누적 수정 {cum['attempts_total']}회 (실행 {cum['runs']}회), "
+                       f"이번 실행 수정 {a['attempts_used']}/{a['max_attempts']}회, 검증 실행 {a['validation_runs']}회]")
+        else:
+            out.append(f"[자동 수정 — {a['status']}, 수정 {a['attempts_used']}/{a['max_attempts']}회, 검증 실행 {a['validation_runs']}회]")
         for label, st in (("수정 전", a["before"]), ("수정 후", a["after"])):
             probs = ", ".join(st["problems"]) if st["problems"] else "없음"
             out.append(f"{label}: simulate exit {st['simulate_exit']}, check_equipment exit {st['check_equipment_exit']}, 문제: {probs}")
         for i, c in enumerate(a["changes"], 1):
-            out.append(f"수정 {i}: {c['reason']}")
+            run = f" (실행 {c['run']})" if c.get("run") else ""
+            out.append(f"수정 {i}{run}: {c['reason']}")
             if c.get("reps_note"):
                 out.append(f"    {c['reps_note']}")
             for sc in c["scale_changes"]:

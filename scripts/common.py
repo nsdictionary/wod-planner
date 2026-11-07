@@ -12,13 +12,20 @@ JSON 출력 형식 (--json, 모든 스크립트 공통)
 """
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import sys
+import tempfile
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DATA_DIR = ROOT / "data"
+DEFAULT_DRAFTS_DIR = ROOT / "drafts"
+DEFAULT_WODS_DIR = ROOT / "wods"
+CODE_LEN = 12        # 화면에 보여 주는 해시 접두사 길이 (초안 코드·경고 코드·기록 코드 — 무결성 확인용)
 
 EXIT_OK = 0
 EXIT_FAIL = 1
@@ -336,6 +343,64 @@ def draft_label(draft):
 
 
 # ---------------------------------------------------------------- CLI
+
+# ---------------------------------------------------------------- 해시·시각·원자적 쓰기
+
+def canonical_json(obj):
+    return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def sha256_json(obj):
+    """JSON 값의 내용 해시 (키 순서·공백과 무관)."""
+    return hashlib.sha256(canonical_json(obj).encode("utf-8")).hexdigest()
+
+
+def sha256_file(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def now_iso():
+    """실제 시스템 시각 (로컬 시간대 포함, 초 단위)."""
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def dump_json(obj):
+    return json.dumps(obj, ensure_ascii=False, indent=2) + "\n"
+
+
+def atomic_write_text(path, text, overwrite=False):
+    """같은 디렉터리의 임시 파일에 쓰고 fsync 후 한 번에 반영한다.
+
+    overwrite=False면 대상이 이미 있을 때 FileExistsError (os.link는 기존 파일을 덮지 않는다).
+    중간에 실패해도 대상 파일은 이전 상태 그대로 남는다.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        if overwrite:
+            os.replace(tmp, path)
+        else:
+            os.link(tmp, path)          # 대상이 있으면 FileExistsError — 경쟁 상황에서도 덮어쓰지 않음
+            os.unlink(tmp)
+        tmp = None
+        try:
+            dfd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except OSError:
+            pass
+    finally:
+        if tmp is not None and os.path.exists(tmp):
+            os.unlink(tmp)
+    return path
+
 
 def make_report(script, errors, warnings, result):
     exit_code = EXIT_FAIL if errors else EXIT_OK

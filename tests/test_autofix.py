@@ -4,7 +4,8 @@ from pathlib import Path
 
 import support
 from support import codes
-from autofix import autofix, convert_reps, shortage_options
+from autofix import (append_run, autofix, convert_reps, default_ledger_path, ledger_summary, load_ledger,
+                     shortage_options)
 
 
 def run(d, data=None, **kw):
@@ -217,6 +218,70 @@ class CliTest(unittest.TestCase):
         path = support.write_temp_json(self, {"format": "AMRAP", "movements": []})
         code, _, _ = support.run_script("autofix", path, "--data-dir", support.FIXTURE_DATA)
         self.assertEqual(code, 2)
+
+
+class LedgerTest(unittest.TestCase):
+    """수정 이력 원장: 재검증해도 이전 수정 기록이 사라지지 않는다."""
+
+    def setUp(self):
+        self.data = support.fixture_data()
+        self.d = base([{"id": "row", "reps": 250}, {"id": "box_jump", "reps": 15}])
+
+    def test_rerun_keeps_previous_changes_and_original(self):
+        _, _, r1 = run(self.d, self.data)
+        ledger = append_run(None, self.d, r1, at="2026-11-07T10:00:00+09:00")
+        _, _, r2 = run(r1["final_draft"], self.data)                     # 이미 고친 초안 재검증
+        self.assertEqual(r2["attempts_used"], 0)
+        ledger = append_run(ledger, r1["final_draft"], r2, at="2026-11-07T10:05:00+09:00")
+        self.assertEqual(ledger["original_draft"], self.d)               # 최초 초안 보존
+        self.assertEqual([r["run"] for r in ledger["runs"]], [1, 2])
+        self.assertEqual(len(ledger["runs"][0]["changes"]), 1)           # 1차 수정 기록 유지
+        self.assertEqual(ledger["runs"][0]["before"]["problems"], ["short"])
+        self.assertEqual(ledger["runs"][1]["changes"], [])
+        self.assertTrue(ledger["runs"][1]["input_matches_previous_output"])
+        s = ledger_summary(ledger)
+        self.assertEqual((s["runs"], s["attempts_total"], s["chain_intact"]), (2, 1, True))
+        self.assertEqual(s["first_before"]["problems"], ["short"])
+        self.assertEqual(s["changes"][0]["run"], 1)
+        self.assertNotEqual(s["original_sha256"], s["current_sha256"])
+
+    def test_manual_edit_between_runs_is_flagged(self):
+        _, _, r1 = run(self.d, self.data)
+        ledger = append_run(None, self.d, r1)
+        edited = dict(r1["final_draft"], duration_min=10)
+        _, _, r2 = run(edited, self.data)
+        ledger = append_run(ledger, edited, r2)
+        s = ledger_summary(ledger)
+        self.assertFalse(s["chain_intact"])
+        self.assertEqual(s["manual_edits_between_runs"], [2])
+
+    def test_cli_appends_ledger_and_refuses_corrupt_one(self):
+        path = support.write_temp_json(self, self.d)
+        args = [path, "--data-dir", support.FIXTURE_DATA, "--out", path, "--json"]
+        support.run_script("autofix", *args)
+        code, out, _ = support.run_script("autofix", *args)              # 같은 파일 재검증
+        rep = json.loads(out)["result"]
+        self.assertEqual(code, 0)
+        self.assertEqual((rep["attempts_used"], rep["ledger"]["runs"], rep["ledger"]["attempts_total"]), (0, 2, 1))
+        ledger_path = default_ledger_path(path)
+        self.assertEqual(load_ledger(ledger_path)["original_draft"]["movements"][0]["id"], "row")
+        ledger_path.write_text("{broken")
+        code, _, err = support.run_script("autofix", *args)
+        self.assertEqual(code, 2)
+        self.assertEqual(ledger_path.read_text(), "{broken")             # 손상 원장 덮어쓰지 않음
+
+    def test_ledger_of_other_date_refused(self):
+        _, _, r1 = run(self.d, self.data)
+        ledger = append_run(None, self.d, r1)
+        path = support.write_temp_json(self, ledger)
+        with self.assertRaises(support.common.InputError):
+            load_ledger(path, "2026-12-01")
+
+    def test_no_out_no_ledger(self):
+        path = support.write_temp_json(self, self.d)
+        code, out, _ = support.run_script("autofix", path, "--data-dir", support.FIXTURE_DATA, "--json")
+        self.assertIsNone(json.loads(out)["result"]["ledger"])
+        self.assertFalse(default_ledger_path(path).exists())
 
 
 if __name__ == "__main__":

@@ -7,7 +7,13 @@
       "Bash(python3 scripts/autofix.py:*)",
       "Bash(python3 scripts/check_class.py:*)",
       "Bash(python3 scripts/render_wod.py:*)",
+      "Bash(python3 scripts/recent_wods.py:*)",
+      "Bash(python3 scripts/draft_store.py:*)",
+      "Bash(python3 scripts/save_wod.py check:*)",
       "Edit(drafts/**)"
+    ],
+    "ask": [
+      "Bash(python3 scripts/save_wod.py save:*)"
     ],
     "deny": [
       "Edit(wods/**)"

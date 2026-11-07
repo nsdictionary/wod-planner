@@ -1,7 +1,7 @@
 ---
 name: wod-planner
-description: 크로스핏 박스 코치의 WOD 작성·수정·검증 요청을 처리한다 ("내일 WOD 짜줘", "12명 AMRAP 15분 만들어줘", "이 WOD 30분 안에 되는지 봐줘", "T2B 빼고 다시", "60분 수업안 짜줘"). 박스 데이터(data/)로 WOD 초안 JSON을 만들어 drafts/에 두고, scripts/autofix.py로 검증·자동 수정(최대 3회)한 뒤 결과를 보고하고 코치 승인을 기다린다. 60분 수업 요청이면 scripts/check_class.py로 시간 배분을 검증한다. 운동과 무관한 요청에는 사용하지 않는다.
-allowed-tools: Read, Glob, Bash(python3 scripts/autofix.py:*), Bash(python3 scripts/simulate.py:*), Bash(python3 scripts/check_equipment.py:*), Bash(python3 scripts/check_class.py:*), Bash(python3 scripts/render_wod.py:*)
+description: 크로스핏 박스 코치의 WOD 작성·수정·검증·저장 요청을 처리한다 ("내일 WOD 짜줘", "12명 AMRAP 15분 만들어줘", "이 WOD 30분 안에 되는지 봐줘", "T2B 빼고 다시", "60분 수업안 짜줘", "이대로 저장"). 최근 7일 기록(scripts/recent_wods.py)을 참고해 박스 데이터(data/)로 WOD 초안 JSON을 만들고(scripts/draft_store.py로 기존 초안 보호), scripts/autofix.py로 검증·자동 수정(최대 3회)한 뒤 결과를 보고하고 코치 승인을 기다린다. 승인된 초안만 scripts/save_wod.py로 저장한다. 60분 수업 요청이면 scripts/check_class.py로 시간 배분을 검증한다. 운동과 무관한 요청에는 사용하지 않는다.
+allowed-tools: Read, Glob, Bash(python3 scripts/autofix.py:*), Bash(python3 scripts/simulate.py:*), Bash(python3 scripts/check_equipment.py:*), Bash(python3 scripts/check_class.py:*), Bash(python3 scripts/render_wod.py:*), Bash(python3 scripts/recent_wods.py:*), Bash(python3 scripts/draft_store.py:*), Bash(python3 scripts/save_wod.py check:*)
 ---
 
 # WOD Planner
@@ -15,14 +15,17 @@ allowed-tools: Read, Glob, Bash(python3 scripts/autofix.py:*), Bash(python3 scri
 
 ## 절대 규칙
 
-1. **`wods/`에 직접 쓰지 않는다.** Write·Edit·Bash 어떤 방법으로도. 저장은 승인 후 `scripts/save_wod.py`로만 한다 (§8).
-2. **초안과 최종본을 구분한다.** 초안은 `drafts/<date>.json`(임시, git 제외)에만 쓴다. 초안 작성은 저장이 아니다.
+1. **`wods/`에 직접 쓰지 않는다.** Write·Edit·Bash 어떤 방법으로도. 저장은 `scripts/save_wod.py save`로만 한다 (§8).
+2. **초안과 최종본을 구분한다.** 새 초안은 `drafts/<date>.candidate.json`에 쓰고 `draft_store.py commit`으로 반영한다 (§4). `drafts/<date>.json`을 Write로 직접 덮어쓰지 않는다. 초안 작성은 저장이 아니다.
 3. **시간·수량을 지어내지 않는다.** 라운드 시간, 예상 라운드, 1rep 시간, 전환 시간, 장비 수량을 직접 계산하거나 추정해서 쓰지 않는다. 스크립트 JSON에 있는 값만 인용한다. 스크립트가 "추정 불가"라고 하면 그대로 "추정 불가"라고 보고한다.
 4. **`data/` 파일을 수정하지 않는다.** 등록되지 않은 동작이나 장비가 필요하면 코치에게 알리고 지시를 받는다.
 5. **쓸 수 없는 동작은 넣지 않는다.** 미보유 장비(`available: false`), 금지 동작(`banned_movements`, 그룹별), 층고 제한(`space_tags`에 `high_ceiling` — 링 머슬업 등)이 걸린 동작. 코치가 직접 요청해도 이유를 설명하고 대체 동작을 제안한다. 스케일 동작도 같다.
 6. **경고를 숨기지 않는다.** 스크립트 경고와 자동 수정 내역은 모두 코치에게 전달한다.
 7. **실행하지 않은 검증을 통과로 보고하지 않는다.** 보고하는 모든 결과는 이번 턴에 실제로 실행한 스크립트 출력에서 온다. 스크립트가 실행되지 않았거나 exit 2면 "검증하지 못함"이라고 쓴다. `passed`는 `render_wod.py` 검증 요약에서 `passed`인 항목에만 쓴다.
 8. **화이트보드 WOD를 손으로 쓰지 않는다.** Rx·Scale A/B/C 텍스트는 `render_wod.py`가 초안 JSON에서 만든 `whiteboard`를 그대로 붙인다. 스케일 한 줄(`A ... / ... / ...`)은 스크립트가 만든 형식이다. 네가 줄을 합치거나 나누거나 줄이거나 약어를 바꾸지 않는다.
+9. **코치의 명시적 승인 전에는 `save_wod.py save`를 실행하지 않는다.** 코치가 최종 WOD(화이트보드)와 남은 경고를 보고 이 초안을 저장하라고 분명히 말한 경우에만 실행한다. **저장 도구는 사람의 승인을 확인하지 못한다.** 초안 코드·경고 코드는 `check` 출력에서 누구나 얻을 수 있는 해시이므로, 승인 판단은 전적으로 네 책임이다. 코드를 맞췄다는 것, Claude Code 권한 창에서 "Yes"를 받았다는 것은 WOD 승인이 아니다. 저장을 시도하기 위해 다른 형태의 명령(`./scripts/...`, `python3 -c`, `cp` 등)을 쓰지 않는다.
+10. **스크립트 명령은 하나씩 독립적으로 실행한다.** 이 문서에 적힌 형태(`python3 scripts/<name>.py ...`) 그대로 Bash 호출 한 번에 명령 하나를 실행한다. `;`·`&&`로 잇거나, `echo "exit=$?"`를 붙이거나, `| python3 -c ...`·`| grep` 같은 파이프로 가공하지 않는다. 종료 코드와 값은 `--json` 출력의 `exit_code`·`result`에서 읽는다. 이런 복합 명령은 프로젝트 권한 규칙에 맞지 않아 거부되기 쉽고, 다시 실행하느라 시간이 든다. 파일 내용은 `cat` 대신 Read를 쓴다. 단, §5.1의 `> drafts/<date>.autofix.json` 저장처럼 이 문서가 지정한 리다이렉션은 그대로 쓴다.
+11. **확인하지 않은 사실을 단정하지 않는다.** 최근 기록의 동작 개수, "모든 동작을 썼다/한 번도 안 썼다" 같은 전체 사용 여부, 등록 동작 수, 장비 보유 여부·수량, 패턴 겹침은 이번 턴에 실제로 실행한 스크립트 출력(`recent_wods.py`의 `movement_counts`·`records`, `check_equipment.py` 결과)이나 실제로 읽은 `data/` 파일에서 확인한 경우에만 단정한다. 확인하지 않았으면 "확인하지 않음"이라고 쓰거나, 근거가 된 출력 항목을 함께 적는다. 근거 없이 수를 세거나 일반화하지 않는다.
 
 ## 0. 요청 범위 판단
 
@@ -38,10 +41,17 @@ allowed-tools: Read, Glob, Bash(python3 scripts/autofix.py:*), Bash(python3 scri
 1. `data/rules.md` — 시간 기준(본운동 최대 30분), 시간 표시 4상태, 작성 규칙, 기계 판독 설정
 2. `data/equipment.json` — 보유 장비·수량 정확도(`exact`/`approx`/`unknown`), 공간 제약(층고, 월볼 타깃, 셔틀런)
 3. `data/movements.json` — 등록 동작 id, `display`, `unit`, `equipment`, `space_tags`, `patterns`, `substitutes`, `rx_standard`
-4. 최근 기록: Glob `wods/*.txt` → 목표 날짜 이전 `recent_days`(rules.md, 7일) 안의 파일만 Read.
-   - 파일 상단 `# patterns:` 헤더나 본문 동작으로 패턴(pull/push/legs/cardio)을 파악한다.
-   - `scripts/recent_wods.py`가 생기면 그것을 우선 사용한다. 지금은 없다.
-   - 기록이 없으면 "최근 기록 없음"으로 보고하고 계속 진행한다. 코치가 말한 "오늘 WOD"도 최근 기록으로 취급한다.
+4. 최근 기록 — **WOD를 만들기 전에** 실행한다:
+   ```bash
+   python3 scripts/recent_wods.py --date <목표 날짜> --json
+   ```
+   - 승인·저장된 `wods/YYYY-MM-DD.json`만 읽는다. 기간은 목표 날짜 이전 7일(`rules.md` `recent_days`)이고, 목표 날짜 이후 기록은 제외된다.
+   - `result.records[]`(날짜·형식·시간·동작·패턴), `pattern_counts`, `movement_counts`로 겹침을 판단한다. 기록이 없으면(`no_records`) "최근 기록 없음"으로 보고하고 계속 진행한다.
+   - `movement_repeated`·`pattern_repeated`는 **참고 경고이지 금지가 아니다.** 반복을 택하면 이유를 보고한다.
+   - `record_unreadable`·`record_incomplete`·`record_date_mismatch`·`unrecognized_file` 경고는 숨기지 않고 보고한다(손상된 기록은 최근 기록에서 빠진 상태).
+   - `same_day_record_exists`: 목표 날짜에 이미 저장된 기록이 있다. 코치에게 먼저 알린다.
+   - 초안을 만든 뒤 `--draft drafts/<date>.json`을 붙여 다시 실행하면 초안과 최근 기록의 겹침(`draft_movement_recent`, `draft_pattern_recent`)을 확인할 수 있다.
+   - 코치가 말한 "오늘 WOD"(저장되지 않은 것)도 최근 기록으로 취급한다.
 
 ## 2. 요청 해석
 
@@ -73,9 +83,17 @@ allowed-tools: Read, Glob, Bash(python3 scripts/autofix.py:*), Bash(python3 scri
   - 무게·높이 같은 표기는 `load`, 무게 검사가 필요하면 `weights`.
 - 특이 회원(예: 손목 통증)은 해당 동작의 `substitutes`에서 대체를 골라 `notes`에 적는다.
 
-## 4. 초안 JSON 작성 → `drafts/<date>.json`
+## 4. 초안 JSON 작성 → `drafts/<date>.candidate.json` → `draft_store.py commit`
 
-Write 도구로 `drafts/<date>.json`에 쓴다 (`drafts/`는 git 제외 임시 폴더, 같은 날짜 초안은 수정본으로 덮어써도 된다).
+1. Write 도구로 **후보** `drafts/<date>.candidate.json`에 쓴다 (`drafts/`는 git 제외 임시 폴더).
+2. 반영한다:
+   ```bash
+   python3 scripts/draft_store.py commit <date> --json
+   ```
+   - `created` / `unchanged`: 그대로 진행. `result.approval_code`가 지금 초안의 초안 코드다.
+   - exit 1 `draft_exists`: 같은 날짜 초안이 이미 있다. **덮어쓰지 말고 코치에게 묻는다:** 기존 초안을 계속 쓸지(`--keep-existing`), 새 버전을 만들지(`--new-version` — 기존 초안과 수정 이력은 `drafts/versions/<date>.v<N>.json`에 보존). 두 초안 코드(`existing_code`, `candidate_code`)를 함께 보여 준다.
+   - 코치가 이번 대화에서 직접 수정을 요청한 경우(§8 "수정 요청")는 새 버전 생성 의사로 보고 `--new-version`을 쓴다.
+3. 상태 확인: `python3 scripts/draft_store.py status <date>` (현재 초안 코드, 보존된 버전 목록).
 
 ```json
 {
@@ -165,7 +183,7 @@ python3 scripts/render_wod.py drafts/<date>.json --autofix-report drafts/<date>.
   스케일 동작 수가 Rx와 다르거나 스케일이 없으면 오류(`scale_movement_count_mismatch` / `scale_missing`)이고, 빠진 동작을 채우지 않는다. 스케일 한 줄을 다시 나눠 동작 수가 초안과 다르면 `render_scale_incomplete` 오류다 → 네가 초안 `scales`를 고치고 autofix부터 다시.
 - `result.checks[]`: `{item, status, source, detail}`. status = `passed` / `passed_with_warnings` / `estimated` / `failed` / `shortage` / `not_checked` / `not_estimable`. 보고서의 "검증 요약"은 이 목록만으로 쓴다.
 - `result.coach_review[]`: 자동 검증하지 않는 항목(운동 자극, 스케일 난도, 준비운동·마무리 내용, 복싱 드릴 품질, 거리 환산 적절성). "코치 확인 필요"로 따로 보여 준다. 여기 항목을 passed라고 쓰지 않는다.
-- `result.autofix`: 수정 전/후 상태(`before`/`after`의 exit 코드·문제)와 `changes`. 보고서의 final_draft가 지금 초안과 다르면 `autofix_report_mismatch` 경고가 나오고 전후 비교가 빠진다 → autofix를 다시 실행.
+- `result.autofix`: 수정 전/후 상태(`before`/`after`의 exit 코드·문제)와 `changes`. `--out`을 쓰면 autofix가 수정 이력 원장 `drafts/<date>.history.json`에 실행을 **추가**하므로, 이미 고친 초안을 다시 검증해도 `before`는 최초 수정 전 상태, `changes`는 누적 수정 내역, `cumulative`는 실행 수·누적 수정 횟수다. `attempts_used`는 이번 실행분이다. 보고서의 final_draft가 지금 초안과 다르면 `autofix_report_mismatch` 경고가 나오고 전후 비교가 빠진다 → autofix를 다시 실행. 실행 사이에 초안이 손으로 바뀌었으면 `autofix_history_manual_edit` 경고가 나온다.
 - `result.class_blocks`: 수업 시간표와 복싱 인터벌 타임라인.
 - 응답에 옮긴 WOD 텍스트가 의심되면 `--check-text <파일>`로 모든 줄이 들어 있는지 검사할 수 있다.
 - `drafts/<date>.autofix.json`은 임시 파일이다(drafts/는 git 제외).
@@ -187,7 +205,7 @@ python3 scripts/render_wod.py drafts/<date>.json --autofix-report drafts/<date>.
 ### 자동 수정 — 수정 전 / 수정 내용 / 수정 후
 - 수정 전: (result.autofix.before — exit 코드, 문제 코드)
 - 수정 내용: (changes[]마다 reason, reps_note, 스케일 반영. 없으면 "없음")
-- 수정 후: (result.autofix.after) — autofix status, 수정 n/3회, 검증 실행 m회
+- 수정 후: (result.autofix.after) — autofix status, 누적 수정 n회(실행 k회), 이번 실행 수정 n/3회, 검증 실행 m회
 
 ### 검증 요약 (코드로 검사한 항목)
 (result.checks[]를 한 항목당 한 줄: status · item — detail. detail을 줄이지 말고 그대로)
@@ -199,15 +217,26 @@ python3 scripts/render_wod.py drafts/<date>.json --autofix-report drafts/<date>.
 (result.coach_review[] 그대로 + 이번 요청 특유의 확인 사항, 예: 복싱 장비 보유 여부)
 
 ### 최근 기록
-(최근 7일 패턴과 겹침 여부, 기록 없으면 "최근 기록 없음")
+(recent_wods.py 결과: 최근 7일 기록·패턴과 겹침 여부, 반복 경고, 손상 기록 경고. 기록 없으면 "최근 기록 없음")
 
 ### 특이 회원
 (notes)
 
+### 저장 전 확인 (save_wod.py check)
+- 초안 코드: (result.draft_code — 보여 준 초안과 저장할 초안이 같은지 확인하는 무결성 코드)
+- 남은 경고 n건 · 경고 코드: (result.warnings_code, 없으면 "경고 없음")
+- 같은 날짜 저장 기록: (result.existing_record — 있으면 경로와 기록 코드, 없으면 "없음")
+- 저장 가능 여부: (exit 0 = 가능 / exit 1 = 불가 — errors 그대로)
+
 ---
-초안은 `drafts/<date>.json`에 있습니다 (아직 저장 전).
-이대로 확정해 저장할까요? **"저장"** 또는 **"승인"**이라고 답해 주세요. 수정할 점이 있으면 말씀해 주세요.
+초안은 `drafts/<date>.json`에 있습니다 (초안 코드 <code>, 아직 저장 전).
+위 WOD와 남은 경고를 검토하신 뒤 이 초안으로 확정해 저장할까요? **"저장"** 또는 **"승인"**이라고 답해 주세요. 남은 경고가 있으면 그 경고를 수용한다는 뜻도 함께 말씀해 주세요. 수정할 점이 있으면 말씀해 주세요.
 ````
+
+보고 직전에 저장 가능 여부를 확인한다 (파일을 쓰지 않음):
+```bash
+python3 scripts/save_wod.py check drafts/<date>.json --json
+```
 
 - 시간·장비 섹션의 숫자는 모두 스크립트 JSON에서 온 것이어야 한다.
 - 월볼 타깃 높이·셔틀런 각주는 render_wod가 화이트보드에 자동으로 붙인다.
@@ -248,10 +277,24 @@ python3 scripts/render_wod.py drafts/<date>.json --autofix-report drafts/<date>.
 
 ## 8. 코치 응답 처리
 
-- **수정 요청** ("T2B 빼줘", "15분으로") → §3부터 다시. 초안 덮어쓰기 → autofix 재실행 → 재보고.
+- **수정 요청** ("T2B 빼줘", "15분으로") → §3부터 다시. 후보 작성 → `draft_store.py commit <date> --new-version`(이전 버전 보존) → autofix 재실행 → 재보고. 초안 코드가 바뀌므로 이전 승인은 효력이 없다.
 - **운영 방식 선택** ("파트너로 하자") → 해당 동작에 `concurrent_athletes`를 반영하고 autofix 재실행 (스크립트가 근거 있는 수량으로 다시 비교).
 - **애매한 반응** ("좋네", "괜찮은 듯", "음") → 승인으로 보지 않는다. "저장할까요?"라고 다시 묻는다.
-- **명시적 승인** ("저장", "승인", "확정", "이대로 저장해"):
-  1. 마지막 검증 이후 초안이 바뀌지 않았고 autofix `status`가 `passed`(또는 코치가 남은 경고를 수용)인지 확인한다. 아니면 재검증부터.
-  2. `scripts/save_wod.py`가 있으면: 그 스크립트의 사용법(`--help`)대로 `--approved`를 붙여 실행한다. 같은 날짜 파일이 이미 있어 거부되면 덮어쓰지 말고 코치에게 알리고 지시를 받는다.
-  3. `scripts/save_wod.py`가 **없으면 (현재 상태):** 저장하지 않는다. "승인은 확인했지만 저장 기능(`save_wod.py`)이 아직 구현되지 않아 `wods/`에 저장하지 않았습니다. 초안은 `drafts/<date>.json`에 남아 있습니다."라고 알린다. 다른 방법으로 `wods/`에 쓰지 않는다.
+- **명시적 승인** ("저장", "승인", "확정", "이대로 저장해"): 아래를 모두 만족할 때만 승인으로 본다.
+  - 코치의 **바로 직전 보고(최종 화이트보드·남은 경고·초안 코드를 보여 준 보고)에 대한 답**이다. 다른 날짜·다른 버전·가정형("저장해도 될까?")·조건부("T2B만 빼면 저장")는 승인이 아니다.
+  - 그 보고 이후 초안이 바뀌지 않았다. 바뀌었으면 다시 보고하고 다시 승인받는다.
+  - 남은 경고가 있었다면 코치가 그 경고를 보고 수용한다는 뜻이 있다. 없으면 경고를 다시 짚고 확인을 받는다.
+
+  절차:
+  1. `python3 scripts/save_wod.py check drafts/<date>.json --json`을 다시 실행한다. `draft_code`나 `warnings_code`가 보고 때와 다르면 저장하지 말고 바뀐 내용을 재보고한다. exit 1이면 errors를 그대로 보고하고 저장하지 않는다.
+  2. 저장 (한 줄로 실행):
+     ```bash
+     python3 scripts/save_wod.py save drafts/<date>.json --draft-code <보고한 초안 코드> --coach-message "<코치 승인 발화 원문>" [--accept-warnings <보고한 경고 코드>] --json
+     ```
+     - `--draft-code`·`--accept-warnings`는 **코치에게 보고한 값**만 쓴다. 보고하지 않은 새 값을 넣지 않는다.
+     - `--accept-warnings`는 코치가 남은 경고를 수용했을 때만 붙인다. 네가 대신 수용하지 않는다.
+     - `--coach-message`에는 코치 발화를 그대로 옮긴다. 지어내지 않는다 (스크립트는 이 값을 검증하지 않는다).
+     - 이 명령은 프로젝트 설정에서 `ask`라서 권한 창이 뜬다. 거부되면 저장하지 않은 것이다. 권한 허가는 명령 실행 허가일 뿐 WOD 승인이 아니다.
+  3. **결과는 실제 출력으로만 보고한다.** exit 0이고 `result.saved`가 true일 때만 "저장됨"이라고 쓰고 `saved_path`, `approved_at`, `record_code`를 인용한다. 그 밖(exit 1·2, 권한 거부, 실행 안 함)은 "저장하지 않았습니다"와 errors를 그대로 보고한다.
+  4. `record_exists`(같은 날짜 기록 있음): 덮어쓰지 않는다. 코치에게 기존 기록 교체 여부를 **별도로** 묻고, 명시적으로 교체를 지시받은 경우에만 `--replace-existing <기록 코드>`를 붙여 다시 실행한다(기존 기록은 `wods/archive/`에 보존).
+  5. `draft_code_mismatch`: 코치에게 보여 준 뒤 초안이 바뀌었다. 바뀐 초안을 다시 보고하고 새로 승인받는다.

@@ -202,6 +202,36 @@ class AutofixOutputTest(unittest.TestCase):
         self.assertIn("autofix_report_mismatch", codes(warnings))
 
 
+class CumulativeAutofixTest(unittest.TestCase):
+    """재검증 후에도 render_wod가 최초 수정 전 상태와 이전 수정 내역을 보여 준다 (Phase 4)."""
+
+    def test_rerun_report_shows_cumulative_changes(self):
+        from autofix import append_run, ledger_summary
+        data = support.fixture_data()
+        d = base([{"id": "row", "reps": 250}, {"id": "box_jump", "reps": 15, "load": "24/20 in"}])
+        for lv in "ABC":
+            d["scales"][lv][0] = {"id": "row", "reps": 200}
+        _, _, r1 = autofix(d, data)
+        ledger = append_run(None, d, r1)
+        _, _, r2 = autofix(r1["final_draft"], data)
+        ledger = append_run(ledger, r1["final_draft"], r2)
+        r2["ledger"] = ledger_summary(ledger)
+        _, warnings, result = build(r1["final_draft"], data, autofix_report={"result": r2})
+        a = result["autofix"]
+        self.assertEqual(a["attempts_used"], 0)                          # 이번 실행
+        self.assertEqual(a["cumulative"]["attempts_total"], 1)           # 누적
+        self.assertEqual(a["before"]["problems"], ["short"])
+        self.assertEqual(len(a["changes"]), 1)
+        self.assertNotIn("autofix_history_manual_edit", codes(warnings))
+        self.assertIn('A 13 Shuttle Runs / 12 Box Jumps (20")', result["whiteboard"].splitlines())   # 한 줄 스케일 형식 유지
+
+    def test_report_without_ledger_still_works(self):
+        data = support.fixture_data()
+        _, _, r1 = autofix(base(), data)
+        _, _, result = build(base(), data, autofix_report={"result": r1})
+        self.assertIsNone(result["autofix"]["cumulative"])
+
+
 class SummaryTest(unittest.TestCase):
     def setUp(self):
         self.data = support.fixture_data()

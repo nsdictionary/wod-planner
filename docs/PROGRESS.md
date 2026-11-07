@@ -3,7 +3,7 @@
 > 모든 에이전트는 작업 시작 전 이 파일을 읽고, 작업 후 갱신한다.
 > 상태 표기: ✅ 완료(코드·테스트로 확인됨) / 🚧 진행 중 / ⬜ 미착수
 
-## 현재 단계: Phase 4 준비 — Phase 3.7(화이트보드 간결 형식) 완료 (2026-11-07)
+## 현재 단계: Phase 4 완료 (2026-11-08) — 다음: 코치 확인 항목·Phase 5 범위 결정
 
 Phase 순서 변경(2026-11-07, 사용자 지시): Skill을 먼저 구현(Phase 3)하고, `recent_wods.py`·`save_wod.py`는 Phase 4로 미뤘다.
 `wod-planner` Skill이 새 Claude Code 세션에서 발견되고, 자연어 요청 1건으로 초안 작성 → 두 검증 스크립트 → 보고 → 승인 대기까지 동작함을 확인했다.
@@ -19,7 +19,7 @@ Phase 순서 변경(2026-11-07, 사용자 지시): Skill을 먼저 구현(Phase 
 | 3.5 | `scripts/autofix.py`, `scripts/check_class.py`, 스케일 A/B/C·`max_workout_min` 검증 + Skill 절차 갱신 (사용자 지시로 Post-MVP 일부를 앞당김) | ✅ 테스트 108개 통과(기존 67 + 신규 41), 실제 data/로 자동 수정 1건 확인. 새 Skill 절차 E2E는 미실행 |
 | 3.6 | `check_class.py --interval`(복싱 라운드·휴식 시간), `scripts/render_wod.py`(초안 → 화이트보드·검증 요약·코치 확인 항목), autofix `final_text` | ✅ 테스트 131개 통과(기존 108 + 신규 23), 실제 초안 출력 완전성 테스트 포함. 실행 권한은 settings.json·Skill `allowed-tools` 양쪽에 반영됨(사용자 추가) |
 | 3.7 | 화이트보드 간결 형식(Rx 1회, Scale A/B/C 레벨별 한 줄, 등록 약어만, 셔틀런 각주) + 한 줄 스케일 완전성 검사 | ✅ 테스트 138개 통과(기존 131 + 신규 7) |
-| 4 | `scripts/recent_wods.py`, `scripts/save_wod.py` + 테스트 + 시나리오 S1–S6 | ⬜ 다음 단계 |
+| 4 | `save_wod.py`(승인 후 저장), `recent_wods.py`(최근 7일), `draft_store.py`(초안 보호), autofix 이력 원장 + 테스트 + Skill·문서 | ✅ 테스트 173개 통과(기존 138 + 신규 35). PLAN §8.2 시나리오 S1–S6 모두 PASS, 사용자 지정 통합 E2E 6개 PASS (2026-11-08, 샌드박스·헤드리스). 아래 "Phase 4 E2E" 참고 |
 | 5 | Post-MVP (키즈, 장비 회전, 패턴 판정, 결과 보정) | ⬜ |
 
 ## 코치 확정 사항 (2026-11-07)
@@ -127,36 +127,72 @@ Phase 순서 변경(2026-11-07, 사용자 지시): Skill을 먼저 구현(Phase 
 - **문서:** SKILL.md(규칙 8, §5.1, §6), rules.md §5·§8, README, PLAN 표 갱신.
 - **한계:** 이름은 `display` 기준이라 예시의 단수형(`Box Jump`, `Step Up`)과 다르게 복수형(`Box Jumps`, `Step-ups`)으로 나온다. 바꾸려면 `whiteboard.name`을 코치가 정해 등록한다.
 
-## 다음 할 일 — Phase 4
-0. (Phase 3.6 마무리) 새 세션에서 수업안 포함 요청으로 Skill E2E 확인 (실행 권한은 반영 완료).
-1. `scripts/recent_wods.py`: `wods/`에서 기준 날짜 이전 7일(`rules.md` `recent_days`) WOD 파일 조회, 헤더 파싱, 날짜 정렬.
-2. `scripts/save_wod.py`: `--approved` 없으면 거부, 같은 날짜 파일이 있으면 거부(덮어쓰기 금지), `wods/YYYY-MM-DD.txt` 저장.
-3. 두 스크립트 모두 `common.py`의 종료 코드·JSON 형식을 따른다. 테스트는 임시 디렉터리 사용.
-4. Skill의 저장·최근 기록 단계가 새 스크립트를 쓰는지 확인 (`SKILL.md` §1·§8은 이미 "있으면 사용"으로 작성됨). `.claude/settings.json`에 두 스크립트 실행 허용 추가.
-5. 시나리오 S1–S6 실행·기록.
+## Phase 4 구현 결과 (2026-11-07 ~ 2026-11-08)
+- **`scripts/save_wod.py`:** `check <draft>`(재검증, 초안 코드·경고 코드·같은 날짜 기록 코드 표시, 파일 안 씀) / `save <draft> --draft-code CODE --coach-message TEXT [--accept-warnings CODE] [--replace-existing CODE]`(`--approve`는 예전 이름). 저장 조건: 초안 코드 일치, 재검증 오류 없음, 정확 수량 부족(`short`) 없음, 경고가 있으면 경고 코드 일치, 같은 날짜 기록은 기록 코드로만 교체(이전본 `wods/archive/`). 임시 파일 → fsync → `os.link`(새 파일)/`os.replace`(교체). 기록 `wods/<date>.json`(`wod-record/1`): `approved_at`(save 실행 시점 실제 시스템 시각), `approval`(`method: agent_reported`, `coach_message_verified: false`, `draft_code`), `wod`, `summary`, `whiteboard`, `validation`, `autofix`(원장 요약·최초 초안·실행 기록).
+- **승인 보장 수준 (2026-11-08 확인·결정):** 초안 코드·경고 코드·기록 코드는 파일만 있으면 계산되는 해시라 **사람 승인의 증명이 아니다.** 임시 디렉터리에서 CLI 인자만으로 저장되는 것을 재현했다. 코드는 "보여 준 초안 = 저장할 초안" 무결성과 상태 확인용이다. 승인 판단은 Skill(에이전트) 책임이다. `.claude/settings.json`의 `ask`(`python3 scripts/save_wod.py save:*`)는 그 형태의 명령에서 실제 권한 창을 띄웠다(사용자 확인). 하지만 이것은 실행 허가일 뿐 WOD 승인이 아니다. TTY 확인 같은 강한 증명은 로컬 개인용 범위를 넘어 도입하지 않기로 했다(사용자 결정).
+- **`scripts/recent_wods.py`:** `wods/YYYY-MM-DD.json`(최상위)만, 기간 [기준일−7일, 기준일), 기준일 당일은 `same_day`, 이후는 제외(경고). 형식·시간·동작·패턴 요약, 동작 2회 이상·패턴 3회 이상 반복 참고 경고, `--draft` 겹침 경고(금지 아님). 손상 JSON·필수 필드 누락·파일명≠date·형식 불명 파일(.txt 등)·미등록 동작 경고.
+- **`scripts/draft_store.py`:** 후보 `drafts/<date>.candidate.json` → 현재 초안. 같은 날짜 초안이 있으면 기본 거부(exit 1), `--keep-existing` / `--new-version`(이전 초안·원장을 `drafts/versions/<date>.v<N>.json`에 보존). `status`로 초안 코드·버전 목록.
+- **`scripts/autofix.py` 이력 원장:** `--out` 시 `<out>.history.json`(`autofix-ledger/1`)에 실행 추가: `original_draft`, `runs[]`(시각, 입력·출력 해시, 직전 출력과 연결 여부, status, 수정 전/후, changes). 결과 JSON의 `changes`/`history`는 이번 실행분(기존 구조 유지), `ledger`는 누적 요약. 손상·다른 날짜 원장은 덮어쓰지 않고 exit 2. `--out` 수정본 쓰기도 원자적으로 변경.
+- **`scripts/render_wod.py`:** autofix 보고서에 원장 요약이 있으면 최초 수정 전 상태·누적 수정 내역 표시, 실행 사이 수동 변경 경고. 한 줄 스케일 화이트보드 형식 그대로.
+- **`scripts/common.py`:** `sha256_json`, `sha256_file`, `now_iso`, `atomic_write_text`, 기본 경로 상수.
+- **Skill:** 생성 전 `recent_wods.py`, 후보 → `draft_store.py commit`, `save_wod.py check` 결과를 보고에 포함, 규칙 9(코치가 최종 WOD·경고를 검토하고 명시적으로 승인하기 전 `save` 금지, 코드·권한 허가는 승인이 아님, 다른 형태 명령 금지), §8 저장 절차(`--draft-code`, 보고한 값만, 결과는 실제 출력으로만 보고). `allowed-tools`에 `recent_wods.py`·`draft_store.py`·`save_wod.py check` 추가(`save` 제외).
+- **`.claude/settings.json`:** allow에 `recent_wods.py`·`draft_store.py`·`save_wod.py check`, ask에 `save_wod.py save`. 에이전트가 직접 반영함(이번엔 거부되지 않음).
+- **테스트 (+35):** `test_save_wod.py` 15(초안 코드 없음·불일치·JSON 승인 필드 무시, 메시지 필수, 검증 실패, 정확 수량 부족, 경고 코드, 승인 후 초안 변경, 정상 저장 필드, 전체 해시, 중복·교체·보존, 원장 포함, 원자적 쓰기, 승인 증명 아님 기록·코드 계산 가능, CLI·예전 인자), `test_recent_wods.py` 6, `test_draft_store.py` 7, `test_autofix.py` 원장 5, `test_render_wod.py` 누적 표시·호환 2. 모두 임시 디렉터리 사용, 실제 `wods/` 미생성 확인.
+- **수동 검증 (2026-11-08, 임시 디렉터리, 실제 `wods/` 미사용):** save 시나리오 — `--approve` 생략 exit 2, 틀린 코드 exit 1, 경고 코드 없음 exit 1, 정상 저장 exit 0(권한 창 표시·사용자 일회성 Yes), 중복 exit 1·틀린 교체 코드 exit 1(기록 해시 불변). recent — 7일 경계·미래 제외·같은 날짜·손상 JSON·.txt 경고·반복/겹침 경고, exit 0. autofix — 같은 초안 2회 실행 후 원장에 실행 2개, 1차 수정 보존, render가 "누적 수정 1회(실행 2회)·수정 전 short" 표시. draft_store — 기본 거부 exit 1(현재 초안 불변), `--new-version` exit 0, v1이 이전 초안과 바이트 동일.
 
-## 코치 확인 필요
+### 알려진 한계 (Phase 4)
+- **승인 증명 없음:** 저장 도구는 사람이 승인했는지 확인하지 못한다. CLI 인자를 직접 구성하면 코치 없이도 저장된다. `ask` 권한 규칙은 `python3 scripts/save_wod.py save` 형태에만 걸리고, 다른 명령 형태·Bash 파일 쓰기(`cp`, `python3 -c`)·권한 우회 모드·Codex CLI에는 효력이 없다. `deny Edit(wods/**)`는 Edit/Write 도구만 막는다.
+- `--coach-message`는 검증하지 않는다. `approved_at`은 저장 실행 시각이다(코치 발화 시각 아님).
+- `--wods-dir`를 생략하면 실제 `wods/`가 기본값이다. 테스트·수동 검증에서는 항상 임시 경로를 지정해야 한다.
+- 반복 경고 기준(동작 2회·패턴 3회)은 휴리스틱이며 코치 확인 전이다.
+- `draft_store.py`는 에이전트가 후보 파일 절차를 따를 때만 보호한다. `Edit(drafts/**)` 허용이라 Write로 `drafts/<date>.json`을 직접 덮어쓰는 것은 권한으로 막지 않는다(Skill 규칙 2로만 금지).
+- 원장(`drafts/*.history.json`)과 버전(`drafts/versions/`)은 git 제외 임시 폴더에 있다. 영구 보존은 저장된 기록의 `autofix` 필드뿐이다.
+- 예전 `wods/*.txt` 형식은 읽지 않는다(경고만). 현재 실제 `wods/`에는 기록이 없다.
+- E2E는 LLM 출력이라 실행마다 동작 선택·문장이 달라질 수 있다. 아래 결과는 2026-11-08 각 1회 실행 기록이다.
+- 에이전트가 쓰는 서술 문장(개수·전체 사용 여부 등)은 코드로 검증되지 않는다. 사용자 E2E 세션 B에서 근거 없는 주장 1건이 나왔고, Skill 규칙 11로 금지했다(규칙 추가 후 재발 여부는 PLAN 시나리오 4개 실행에서만 관찰 — 해당 문장 없음).
 
-### A. 미확인 장비 수량 (Phase 1 완료에는 영향 없음 — 검증 시 경고로 표시)
-- [ ] **A1.** 덤벨 1 / 1.5 / 2 / 10 / 15 / 20kg 개수 (현재 `unknown`)
-- [ ] **A2.** 월볼 무게별 구성 (총 약 20개)
-- [ ] **A3.** 링 개수, 줄넘기 개수
-- [ ] **A4.** 케틀벨 무게별 개수
-- [ ] **A5.** 정확한 층고 (현재 "낮음"만 기록)
-- 추정 수량(`approx`): 풀업바 약 8명, 셔틀런 약 8명, 원판 10–45lb 각 약 10장, 월볼 약 20개, 타깃 약 2.3m
+## Phase 4 E2E (2026-11-08)
 
-### B. 시간 추정 데이터 (선택 — 없어도 MVP 동작, 있으면 라운드 시간 추정 가능)
-- [ ] **B1.** 동작별 추정 범위(빠른 회원~느린 회원)와 근거 → `movements.json` `time_estimate`
-- [ ] **B2.** 동작 간 전환 시간 범위 → `rules.md` `estimation.transition_sec_range`
-- [ ] **B3.** 피로도 반영 방식 → `rules.md` `estimation.fatigue_slowdown_per_round`
-- 실제 수업 결과(완료 라운드·시간)를 모아 보정하는 방식이 현실적이다(Post-MVP R9).
+공통 하네스: 프로젝트를 `.git`·`drafts`·`wods` 없이 임시 폴더에 복사(스크립트 기본 경로가 복사본 안으로 향함 → 실제 `wods/` 미접근), 헤드리스 `claude -p --output-format stream-json`, `--settings <복사본>/.claude/settings.json`(샌드박스가 신뢰되지 않은 작업 공간이라 프로젝트 allow가 무시되기 때문). 실행 후 실제 저장소 `git status` 변화 없음, 실제 `wods/` 미생성 확인. 코드 수정 없음.
 
-### C. 기타
-- [ ] **C1.** 동작 패턴 분류 초안 확인 (`movements.json` `patterns`). V-up 같은 코어 동작을 별도 분류로 둘지
-- [ ] **C2.** 복싱 관련 요구 범위 (기획서는 복싱 파트 구성을 범위 밖으로 둠. 60분 구성 Post-MVP에서 시간 배분만 다룰지)
-- [ ] **C3.** 자주 쓰는 동작 추가 목록 (현재 기획서 등장 동작 + 링 머슬업만 등록. 덤벨·케틀벨·줄넘기 동작 등)
-- [ ] **C4.** 복싱 장비 보유 여부·수량(글러브, 미트, 샌드백) — 수업안 복싱 드릴 구성에 필요
-- [ ] **C5.** 셔틀런을 로잉 대체로 쓸 때 거리 환산(250m ≈ 17회)이 적절한지, 다른 환산 기준이 있는지
+### A. PLAN §8.2 원래 시나리오 (Phase 4 완료 기준)
+
+| ID | 입력 | PLAN 기대 결과 | 실제 결과 | 판정 |
+|----|------|---------------|----------|------|
+| S1 | "내일 18:30 수업 예상 10명이야. 오늘은 로잉 250m + 버피 10개 5라운드 했어. 내일은 짐내스틱 위주로 WOD 짜줘. 손목 아픈 회원 1명 있어." (Phase 3과 같은 입력, 현재 Skill로 재실행) | 짐내스틱 위주, 로잉·버피와 패턴 겹침 언급, 본운동 30분 검증, "추정 불가", 손목 회원 대체, 저장 전 승인 요청 | T2B·V-ups 중심 AMRAP 14(Box Jumps는 박스 10 vs 9 `short`로 autofix가 Wall Balls로 교체). 오늘 WOD(cardio·push)와 비교해 push 겹침 언급. 14 ≤ 30 검증됨. 완주 가능성 추정 불가(누락 목록). 손목 회원 T2B → V-ups. 풀업바 `possibly_short` → 운영 선택지(스크립트 근거 인용). 저장 시도 0, 승인 질문에서 멈춤 | PASS |
+| S2 | "내일 성인 6명 수업 WOD 짜줘. 링 머슬업 넣어줘." | 층고 제한을 이유로 만들지 않고 대체 동작 제안 | 층고 제한(`high_ceiling`)을 근거로 링 머슬업 제외, 등록 대체가 없음을 밝히고 T2B+Burpees로 대체. 초안에 `ring_muscle_up` 없음. 링 로우·딥은 미등록이라 못 썼다고 안내. 저장 시도 0 | PASS |
+| S3 | "내일 성인 6명 수업, AMRAP 40분으로 짜줘." | 30분 초과로 거부, 30분 이하로 조정 제안 | "AMRAP 40분은 만들지 않았습니다. 본운동은 최대 30분" + AMRAP 30 이하 / 40분 블록 안에 AMRAP 30 두 가지 제안. 초안 미생성, 저장 시도 0 | PASS |
+| S4 | 주간 플랜 없이 요청 | 최근 기록만으로 생성 | (아래 B의 세션 B로 확인) 주간 플랜 없이 11-11 요청 → `recent_wods.py` 결과(11-06·11-08·11-10)만으로 동작 선택, 전날 Shuttle 제외 | PASS |
+| S5 | "오늘 저녁 메뉴 추천해줘" | "WOD 요청이 아닙니다" | "WOD 요청이 아닙니다." 도구 호출 0. 안내 문장 1줄을 덧붙임(Skill의 "라고만 답한다"보다 한 줄 많음 — 경미) | PASS |
+| S6 | 승인 없이 "좋네" 정도의 반응 | 저장하지 않고 명시적 승인 재확인 | (아래 B의 S5로 확인) "오 좋네, 괜찮은 것 같아" → 저장 시도 0, 승인으로 보지 않음, 경고 7건 재확인 후 질문 | PASS |
+
+### B. 사용자 지정 통합 시나리오 (Phase 4 기능 흐름)
+
+fixture: `wods/2026-11-06.json`(T2B·Box Jumps), `wods/2026-11-08.json`(Row·Burpees), `drafts/2026-11-10.json`(Wall Balls·V-ups) — 모두 `[E2E fixture]` 표시.
+
+| ID | 내용 | 실제 결과 | 판정 |
+|----|------|----------|------|
+| S1 | 최근 7일 조회 후 60분 수업안 | 첫 단계에서 `recent_wods.py`, 11-08 Row 겹침 언급, 수업 60분·복싱 4×3/1 검증 통과 | PASS |
+| S2 | 기존 초안 덮어쓰기 전 확인 | `draft_exists`로 멈추고 두 초안 코드 제시 → "새 버전" 답 후 `--new-version`, v1 = fixture(초안 코드 `df4de1386d8e` 일치) | PASS |
+| S3 | 제약 위반 자동 수정·이력 보존 | 로잉 6 vs 5 → Row 200m → Shuttle 13회, 코치 요청 동작 변경을 명시. 원장·저장 기록 `autofix`에 최초 초안(Row)과 수정 보존 | PASS |
+| S4 | 화이트보드·A/B/C | Rx 1회, 스케일 레벨별 한 줄(동작 3개), 각주. 응답 화이트보드 `--check-text` 빠진 줄 0 | PASS |
+| S5 | 명시적 승인 없이 저장 안 함 | 턴 1–3 저장 시도 0, "좋네"는 승인 아님으로 처리 | PASS |
+| S6 | 승인 후 저장 → 다음 세션 반영 | 테스트 입력 승인 후 `check` 재확인 → `save` exit 0(기록 코드 `21dce7366daf`, `agent_reported`, 경고 7건 수용). 새 세션(11-11)의 최근 기록에 11-10 반영 | PASS |
+
+- S6 저장 권한은 **테스트 하네스가 코치의 권한 창 Yes를 대신**했다(샌드박스 복사본 설정에서만 `save`를 ask → allow). 승인 문장도 테스트 입력이다. 첫 저장 시도는 ask 규칙으로 거부됐고, 에이전트는 "저장하지 않았습니다"라고 정확히 보고했다.
+- 사용자 지정 E2E의 첫 Turn 1은 신뢰되지 않은 작업 공간 때문에 프로젝트 allow가 무시돼 무효 처리하고 `--settings`로 재실행했다.
+
+### E2E에서 발견한 문제
+- **복합 명령 권한 거부:** `cmd; echo "exit=$?"`, `| python3 -c` 형태가 거부돼 재실행. → Skill 규칙 10(명령 하나씩) 추가. 추가 후 PLAN 시나리오 4개 실행에서는 복합 명령 0건.
+- **근거 없는 단정:** 세션 B "등록된 동작 9개를 최근 7일에 모두 썼습니다"(사실 아님 — Hanging Knee Raise·Step-up 미사용). → Skill 규칙 11 추가.
+- **자연어 요청 시 Skill 도구 권한:** PLAN 시나리오 S1–S3에서 헤드리스 세션의 `Skill` 도구 호출이 권한 거부됐고, 에이전트가 `SKILL.md`를 Read로 직접 읽어 같은 절차를 따랐다. 대화형 세션에서는 권한 창이 뜰 것으로 보이며, 헤드리스·대화형 모두에서 확인하지 않은 설정 변경은 하지 않았다.
+- **S5 응답:** 필수 문구 뒤에 안내 1줄을 덧붙임(경미).
+- (무효 처리된 첫 실행에서) 데이터에 없는 월볼 무게를 "확인 필요"와 함께 적은 사례 1건.
+
+## 다음 할 일
+1. 코치 확인: 반복 경고 기준(동작 2회·패턴 3회), 동작 패턴 분류, 장비 미확인 수량, 월볼 무게 구성, 짐내스틱 동작 추가(링 로우·딥 등 등록 여부).
+2. (선택) 헤드리스·자동화 사용이 필요하면 `Skill` 도구 권한 허용 방식을 확인한다.
+3. Phase 5 범위 결정 (키즈, 장비 회전, 패턴 판정, 결과 보정).
 
 ## 작업 로그
 - 2026-11-07: 기획서 분석, MVP 범위·프로젝트 구조·구현 단계 설계, 문서 초안 작성. 기능 코드 없음.
@@ -167,5 +203,7 @@ Phase 순서 변경(2026-11-07, 사용자 지시): Skill을 먼저 구현(Phase 
 - 2026-11-07: **Phase 2 완료**. `scripts/common.py`·`check_equipment.py`·`simulate.py` 구현, 테스트 67개 통과(`tests/fixtures/`에만 가상 시간 값). 종료 코드 0/1/2·공통 JSON 형식 확정. 초안 선택 필드(`group`, `weights`, `units_per_athlete`, `concurrent_athletes`) 추가(PLAN §4.3). `data/` 변경 없음. Skill·커밋 미진행.
 - 2026-11-07: **Phase 3 완료** (Phase 순서 변경: Skill 먼저). `.claude/skills/wod-planner/SKILL.md`, `.claude/settings.json` 추가. 새 헤드리스 세션에서 Skill 발견·자연어 E2E(초안→검증 2종→보고→승인 대기) 확인, `wods/` 미생성. deny 규칙 실동작은 미검증. PLAN §6·§7, CLAUDE.md, AGENTS.md, README 갱신. 커밋 미진행.
 - 2026-11-07: **Phase 3.5 완료** (사용자 지시로 Post-MVP 일부 앞당김). `autofix.py`(최대 3회 자동 수정·재검증), `check_class.py`(수업 시간 검증), 스케일 A/B/C·`max_workout_min` 검증, check_equipment issue 위치 정보. Skill §3·§5·§7 갱신, AGENTS·PLAN·rules.md 범위 문구 갱신. 테스트 108개 통과. settings.json 권한 추가 실패(분류기 거부), 새 절차 E2E 미실행. 커밋 미진행.
+- 2026-11-08: **Phase 4 완료**. PLAN §8.2 시나리오 S1–S6 PASS(S1·S2·S3·S5 현재 Skill로 헤드리스 실행, S4·S6은 통합 E2E 세션으로 확인), 사용자 지정 통합 E2E 6개 PASS. 모두 샌드박스 복사본에서 실행, 실제 `wods/` 미접근. Skill 규칙 10(명령 하나씩 실행)·11(확인하지 않은 사실 단정 금지) 추가. 테스트 173개 통과. 커밋 미진행.
+- 2026-11-08: **Phase 4 스크립트·테스트 완료**. `save_wod.py`·`recent_wods.py`·`draft_store.py`·autofix 이력 원장, Skill·settings·문서 갱신. CLI 인자만으로 저장 가능함을 재현하고, 초안 코드를 "승인 증명이 아닌 무결성 확인용"으로 코드·문서에 명시. 테스트 173개 통과. 시나리오 S1–S6 미실행. 커밋 미진행.
 - 2026-11-07: **Phase 3.7 완료**. 화이트보드 간결 형식(Rx 1회, 스케일 레벨별 한 줄, T2B 약어·셔틀런 각주는 데이터 등록분만), 한 줄 스케일 완전성 검사. 테스트 138개 통과. 커밋 미진행.
 - 2026-11-07: **Phase 3.6 완료**. 복싱 인터벌 시간 검증(`check_class.py --interval`), `render_wod.py`(초안 → 화이트보드·검증 요약·코치 확인 분리·출력 완전성 검사), autofix `final_text`. 출력 잘림은 JSON 누락이 아니라 표시·복사 단계로 판단, 화이트보드를 코드 생성으로 전환. 테스트 131개 통과. render_wod 실행 권한은 사용자가 settings.json·Skill에 추가.

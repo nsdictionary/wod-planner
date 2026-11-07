@@ -1,6 +1,6 @@
 """WOD 초안 자동 수정·재검증 루프.
 
-  python3 scripts/autofix.py <draft.json> [--out PATH] [--max-attempts N] [--data-dir DIR] [--json]
+  python3 scripts/autofix.py <draft.json> [--out PATH] [--history PATH] [--max-attempts N] [--data-dir DIR] [--json]
 
 절차
   1) simulate + check_equipment를 실행한다 (같은 함수, 같은 데이터).
@@ -25,6 +25,13 @@
     스테이션별 시작 위치만 바꾸는 것은 동시 사용 감소를 보장하지 않으므로 해결책으로 보지 않는다.
   - 형식·필수 필드 누락·미등록 동작은 의도 판단이 필요하므로 자동 수정하지 않는다.
 
+수정 이력 보존 (Phase 4)
+  --out을 쓰면 이력 원장 <out 이름>.history.json(또는 --history PATH)에 이번 실행을 **추가**한다.
+  원장에는 최초 초안(original_draft, 첫 실행의 입력)과 실행별 기록(runs[]: 시각, 입력·출력 해시, 수정 전/후
+  검증 상태, 수정 내역)이 쌓인다. 이미 수정된 초안을 다시 검증해도 이전 실행 기록은 지워지지 않는다.
+  결과 JSON의 changes/history는 이번 실행분이고, ledger는 누적 요약이다.
+  원장이 손상됐거나 다른 날짜 초안의 것이면 덮어쓰지 않고 입력 오류(2)로 멈춘다.
+
 종료 코드: 0 = 통과(두 검증 exit 0, 수량 부족 없음), 1 = 미해결 문제 남음, 2 = 입력 오류.
 """
 
@@ -37,6 +44,7 @@ from pathlib import Path
 
 from check_equipment import check_equipment
 from common import (
+    CODE_LEN,
     DEFAULT_DATA_DIR,
     EXIT_FAIL,
     EXIT_INPUT,
@@ -50,11 +58,16 @@ from common import (
     load_data,
     load_json,
     make_report,
+    now_iso,
+    sha256_json,
     validate_draft,
+    atomic_write_text,
+    dump_json,
 )
 from simulate import simulate
 
 SCRIPT = "autofix"
+LEDGER_SCHEMA = "autofix-ledger/1"
 DEFAULT_MAX_ATTEMPTS = 3
 SHORTAGE_CODES = ("short", "possibly_short")
 SUBSTITUTE_ERROR_CODES = ("equipment_not_owned", "banned_movement", "space_restricted", "weight_not_owned")
@@ -459,6 +472,84 @@ def autofix(draft, data, max_attempts=DEFAULT_MAX_ATTEMPTS):
     return out_errors, final_warnings, result
 
 
+# ---------------------------------------------------------------- 수정 이력 원장
+
+def default_ledger_path(draft_path):
+    p = Path(draft_path)
+    return p.with_name(p.stem + ".history.json")
+
+
+def _state(h):
+    v = h["validation"]
+    return {"simulate_exit": v["simulate"]["exit_code"], "check_equipment_exit": v["check_equipment"]["exit_code"],
+            "problems": h.get("problems") or []}
+
+
+def load_ledger(path, date=None):
+    """원장 읽기. 없으면 None. 손상·형식 불일치·날짜 불일치면 InputError (덮어쓰지 않기 위해)."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    try:
+        ledger = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        raise InputError(f"수정 이력 원장 {path}를 읽을 수 없습니다 ({e}). 덮어쓰지 않았습니다. 파일을 확인하세요.")
+    if not isinstance(ledger, dict) or ledger.get("schema") != LEDGER_SCHEMA or not isinstance(ledger.get("runs"), list):
+        raise InputError(f"수정 이력 원장 {path}의 형식이 {LEDGER_SCHEMA}가 아닙니다. 덮어쓰지 않았습니다.")
+    if date is not None and ledger.get("date") not in (None, date):
+        raise InputError(f"수정 이력 원장 {path}는 {ledger.get('date')} 초안의 것입니다 (지금 초안 {date}). "
+                         f"--history로 다른 경로를 지정하세요.")
+    return ledger
+
+
+def append_run(ledger, input_draft, result, at=None):
+    """원장에 이번 실행을 추가한 새 원장을 돌려준다 (이전 실행은 그대로 둔다)."""
+    in_sha = sha256_json(input_draft)
+    out_sha = sha256_json(result["final_draft"]) if result["status"] != "input_error" else None
+    if ledger is None:
+        ledger = {"schema": LEDGER_SCHEMA, "date": input_draft.get("date") if isinstance(input_draft, dict) else None,
+                  "original_draft": copy.deepcopy(input_draft), "original_sha256": in_sha, "runs": []}
+    else:
+        ledger = copy.deepcopy(ledger)
+    prev_out = ledger["runs"][-1]["output_sha256"] if ledger["runs"] else None
+    hist = result.get("history") or []
+    ledger["runs"].append({
+        "run": len(ledger["runs"]) + 1,
+        "at": at or now_iso(),
+        "input_sha256": in_sha,
+        "output_sha256": out_sha,
+        # 직전 실행의 출력과 이번 입력이 다르면 그 사이에 초안이 손으로 바뀐 것
+        "input_matches_previous_output": None if prev_out is None else prev_out == in_sha,
+        "status": result["status"],
+        "attempts_used": result["attempts_used"],
+        "max_attempts": result["max_attempts"],
+        "validation_runs": result["validation_runs"],
+        "before": _state(hist[0]) if hist else None,
+        "after": _state(hist[-1]) if hist else None,
+        "changes": copy.deepcopy(result["changes"]),
+    })
+    return ledger
+
+
+def ledger_summary(ledger):
+    """누적 요약: 최초 초안 해시, 실행 수, 누적 수정 수·내역, 최초 수정 전 상태, 마지막 수정 후 상태."""
+    if not ledger:
+        return None
+    runs = ledger["runs"]
+    changes = [dict(c, run=r["run"]) for r in runs for c in r.get("changes") or []]
+    return {
+        "original_sha256": ledger.get("original_sha256"),
+        "current_sha256": runs[-1]["output_sha256"] if runs else None,
+        "runs": len(runs),
+        "attempts_total": sum(r.get("attempts_used") or 0 for r in runs),
+        "changes": changes,
+        "first_before": runs[0]["before"] if runs else None,
+        "last_after": runs[-1]["after"] if runs else None,
+        "chain_intact": all(r["input_matches_previous_output"] in (None, True) for r in runs),
+        "manual_edits_between_runs": [r["run"] for r in runs if r["input_matches_previous_output"] is False],
+    }
+
+
 # ---------------------------------------------------------------- 출력
 
 STATUS_TEXT = {
@@ -472,7 +563,11 @@ STATUS_TEXT = {
 def render_text(report):
     r = report["result"]
     lines = [f"[자동 수정] {STATUS_TEXT[r['status']]}",
-             f"수정 {r['attempts_used']}/{r['max_attempts']}회, 검증 실행 {r['validation_runs']}회"]
+             f"이번 실행: 수정 {r['attempts_used']}/{r['max_attempts']}회, 검증 실행 {r['validation_runs']}회"]
+    lg = r.get("ledger")
+    if lg:
+        lines.append(f"누적 이력: 실행 {lg['runs']}회, 수정 {lg['attempts_total']}회 (원장 {r.get('ledger_path')})"
+                     + ("" if lg["chain_intact"] else f" — 실행 {lg['manual_edits_between_runs']} 앞에서 초안이 손으로 바뀜"))
     for h in r["history"]:
         v = h["validation"]
         lines.append(f"  검증 #{h['attempt']}: simulate exit {v['simulate']['exit_code']}, "
@@ -518,6 +613,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="autofix.py", description="WOD 초안을 검증하고 고칠 수 있는 문제를 최대 N회 수정·재검증한다.")
     parser.add_argument("draft", help="WOD 초안 JSON 파일 경로")
     parser.add_argument("--out", default=None, help="수정된 초안을 쓸 경로 (wods/ 안은 거부). 없으면 파일을 쓰지 않음")
+    parser.add_argument("--history", default=None,
+                        help="수정 이력 원장 경로 (기본: --out이 있으면 <out 이름>.history.json, 없으면 원장 안 씀)")
     parser.add_argument("--max-attempts", type=int, default=DEFAULT_MAX_ATTEMPTS, help="최대 수정 횟수 (기본 3)")
     parser.add_argument("--data-dir", default=None, help=f"데이터 디렉터리 (기본: {DEFAULT_DATA_DIR})")
     parser.add_argument("--json", action="store_true", help="JSON으로 출력")
@@ -528,16 +625,28 @@ def main(argv=None):
             raise InputError("--out: wods/ 에는 쓸 수 없습니다. 승인된 WOD 저장은 save_wod.py만 합니다.")
         if args.max_attempts < 0:
             raise InputError("--max-attempts: 0 이상이어야 합니다.")
+        history_path = args.history or (default_ledger_path(args.out) if args.out else None)
+        if history_path and not _out_path_allowed(history_path):
+            raise InputError("--history: wods/ 에는 쓸 수 없습니다.")
         data = load_data(args.data_dir)
         draft = load_json(args.draft)
+        ledger = load_ledger(history_path, draft.get("date") if isinstance(draft, dict) else None) \
+            if history_path else None
         errors, warnings, result = autofix(draft, data, args.max_attempts)
         report = make_report(SCRIPT, errors, warnings, result)
         if result["status"] == "input_error":
             report["exit_code"] = EXIT_INPUT
         if args.out and result["status"] != "input_error":
-            Path(args.out).write_text(json.dumps(result["final_draft"], ensure_ascii=False, indent=2) + "\n",
-                                      encoding="utf-8")
+            atomic_write_text(args.out, dump_json(result["final_draft"]), overwrite=True)
             result["written_to"] = str(args.out)
+        result["ledger"] = None
+        if history_path and result["status"] != "input_error":
+            ledger = append_run(ledger, draft, result)
+            atomic_write_text(history_path, dump_json(ledger), overwrite=True)
+            result["ledger_path"] = str(history_path)
+            result["ledger"] = ledger_summary(ledger)
+        result["final_sha256"] = sha256_json(result["final_draft"]) if result["status"] != "input_error" else None
+        result["approval_code"] = result["final_sha256"][:CODE_LEN] if result["final_sha256"] else None
     except InputError as e:
         report = input_error_report(SCRIPT, e)
 

@@ -81,7 +81,7 @@
 | M1 | `data/`의 장비 목록과 `wods/`의 최근 7일 기록을 읽고 성인 WOD 1개(Rx)를 만든다 | R1, R2(조회만), R3 |
 | M2 | WOD에 쓰인 동작이 미보유 장비·금지 목록에 걸리는지, 미확인 장비를 쓰는지 스크립트로 검증하고, 걸리면 대체를 제안하거나 확인을 요청한다 | R3, R8 |
 | M3 | 본운동 시간 30분 이하를 스크립트로 검증하고, 시간 데이터가 있으면 라운드 시간·예상 라운드/완료를 추정 범위로, 없으면 "추정 불가"로 출력한다 | R4 |
-| M4 | 화이트보드 형식 텍스트를 보여 주고, 코치 승인 후 `wods/YYYY-MM-DD.txt`로 저장한다 | R7 |
+| M4 | 화이트보드 형식 텍스트를 보여 주고, 코치 승인 후 `wods/YYYY-MM-DD.json`으로 저장한다 (Phase 4에서 .txt → .json으로 변경) | R7 |
 | M5 | 위 흐름을 Claude Code Skill 하나로 묶는다 | 전체 |
 
 **MVP 이후(Post-MVP):** 키즈 버전(R6), 장비 회전·동선 계산(R5), 패턴 중복 자동 판정(R2), 실제 결과 기록·보정(R9).
@@ -93,21 +93,23 @@
 ```
 코치 ──입력──▶ Claude Code + wod-planner Skill
                  │  ① data/*.json, data/rules.md 읽기
-                 │  ② scripts/recent_wods.py      → 최근 7일 기록
-                 │  ③ (LLM) WOD 초안 → drafts/<date>.json
-                 │  ④ scripts/check_equipment.py  → 장비/금지 검증
-                 │  ⑤ scripts/simulate.py         → 본운동 30분 검증·라운드 추정
-                 │  ⑥ (LLM) 화이트보드 텍스트 + 시뮬레이션 요약 제시
-                 │  ⑦ 코치 수정 요청 → ③으로
-                 └  ⑧ 코치 승인 → scripts/save_wod.py → wods/<date>.txt
+                 │  ② scripts/recent_wods.py      → 최근 7일 승인 기록 요약·반복 참고 경고
+                 │  ③ (LLM) WOD 후보 → drafts/<date>.candidate.json
+                 │     scripts/draft_store.py commit → drafts/<date>.json (같은 날짜 초안이 있으면 코치 선택)
+                 │  ④ scripts/autofix.py          → check_equipment + simulate, 최대 3회 수정, 이력 원장 추가
+                 │  ⑤ scripts/render_wod.py       → 화이트보드·검증 요약·누적 수정 이력
+                 │  ⑥ scripts/save_wod.py check   → 재검증·초안 코드·경고 코드·같은 날짜 기록 확인 (쓰기 없음)
+                 │     (LLM) 보고 후 승인 대기
+                 │  ⑦ 코치 수정 요청 → ③으로 (--new-version, 이전 버전 보존)
+                 └  ⑧ 코치 명시적 승인(에이전트 판단) → scripts/save_wod.py save --draft-code <코드> (권한 ask) → wods/<date>.json
 ```
 
 ### 주요 설계 결정
 1. **판단은 LLM, 계산은 스크립트.** 기획서의 핵심 고통이 "피곤해서 계산을 건너뜀"이므로, 숫자는 항상 결정적 스크립트가 낸다. LLM 암산은 근거로 쓰지 않는다.
 2. **Skill + 파일 데이터.** 박스 고유 정보는 Skill 본문이 아니라 `data/`에 둔다. CLAUDE.md는 항상 로드되므로 짧게 유지하고, WOD 워크플로는 요청 시에만 로드되는 Skill로 분리한다(기획서의 "CLAUDE.md vs skill" 질문에 대한 답).
 3. **초안은 구조화된 JSON.** LLM이 만든 초안을 JSON(`drafts/`)으로 써야 스크립트가 검증·계산할 수 있다. 화이트보드 텍스트는 이 JSON에서 만든다.
-4. **승인 게이트를 이중으로.** Skill 절차상 승인 확인 + `save_wod.py`가 `--approved` 플래그 없이는 저장 거부, 같은 날짜 파일이 있으면 거부.
-5. **저장 형식은 plain text.** 화이트보드에 그대로 옮길 수 있고, `recent_wods.py`가 다시 읽을 수 있도록 상단에 간단한 메타데이터 헤더를 둔다.
+4. **승인 판단과 저장 안전장치를 분리 (Phase 4).** 코치 승인 판단은 Skill(에이전트)이 대화에서 한다. `save_wod.py`는 사람의 승인을 증명하지 못하며, 다음 무결성·상태 확인만 한다. ① 초안 코드(초안 내용 SHA-256 앞 12자리)가 코치에게 보여 준 값과 같아야 한다. 보여 준 뒤 초안이 바뀌면 거부한다. ② 저장 직전 재검증에 오류나 정확 수량 부족이 없어야 한다. ③ 남은 경고가 있으면 경고 코드(경고 목록 해시)가 같아야 한다. ④ 같은 날짜 기록은 기록 코드(파일 해시)가 있을 때만 교체하고 이전본을 보존한다. 이 코드들은 파일만 있으면 계산되므로 CLI 인자를 직접 구성하면 코치 없이도 저장할 수 있다(2026-11-08 재현). `.claude/settings.json`의 `ask`는 `python3 scripts/save_wod.py save` 형태의 명령 실행 허가일 뿐 WOD 승인이 아니다. TTY 확인 같은 강한 승인 증명은 로컬 개인용 도구 범위를 넘어 도입하지 않는다(2026-11-08 사용자 결정). 저장 기록에는 `approval.method = "agent_reported"`, `coach_message_verified = false`를 남긴다.
+5. **저장 형식은 JSON (Phase 4에서 변경).** `recent_wods.py`가 형식·동작·패턴을 안정적으로 읽고, 승인·검증·자동 수정 이력을 함께 남기기 위해서다. 화이트보드 텍스트는 기록의 `whiteboard` 필드에 그대로 들어 있다.
 6. **표준 라이브러리만.** 설치 없이 Claude Code와 Codex CLI 어디서든 바로 실행·테스트 가능.
 7. **모르는 시간은 모른다고 표시.** 동작 시간은 근거 있는 범위만 쓰고, 없으면 "추정 불가". 본운동 30분 검증은 형식·시간만으로 결정되므로 시간 데이터 없이도 항상 동작한다.
 
@@ -211,30 +213,44 @@
 MVP 지원 형식: `AMRAP`(`duration_min`), `EMOM`(`duration_min`), `FOR_TIME`(`rounds` + `time_cap_min` 필수).
 EMOM은 본운동 시간 검증만 하고, 분당 작업량 추정은 Post-MVP.
 
-### 4.4 저장 파일 `wods/YYYY-MM-DD.txt`
+### 4.4 저장 파일 `wods/YYYY-MM-DD.json` (Phase 4)
+```json
+{
+  "schema": "wod-record/1",
+  "date": "2026-11-10",
+  "approved_at": "2026-11-09T22:41:05+09:00",
+  "approval": {"method": "agent_reported", "note": "…승인 증명 아님…", "draft_code": "…12자리", "approval_code": "(draft_code와 같음, 호환용)",
+               "draft_sha256": "…", "coach_message": "저장", "coach_message_verified": false,
+               "accepted_warnings_code": "…" , "accepted_warnings": [...], "replaced_record": null},
+  "draft_path": "drafts/2026-11-10.json",
+  "wod": { …승인된 초안 그대로… },
+  "summary": {"format": "AMRAP", "workout_min": 12, "movements": [...], "patterns": [...]},
+  "whiteboard": "WOD - AMRAP 12\n\n…",
+  "validation": {"validated_at": "…", "checks": [...], "errors": [], "warnings": [...]},
+  "autofix": {"stale": false, "summary": {...}, "original_draft": {...}, "runs": [...]} | null
+}
 ```
-# date: 2026-11-10
-# format: AMRAP 12
-# patterns: pull, legs, cardio
-# approved_by: coach
+- `approved_at`: `save`를 실행한 순간의 실제 시스템 시각(로컬 시간대). 코치 발화 시각이 아니다.
+- 교체된 이전 기록은 `wods/archive/<date>.<시각>.json`에 보존한다. `recent_wods.py`는 `wods/` 최상위만 읽는다.
 
-WOD - AMRAP 12
-10 Toes-to-Bar
-...
-
-[시뮬레이션]
-...
-```
+### 4.5 초안 파일 (Phase 4)
+| 경로 | 내용 |
+|------|------|
+| `drafts/<date>.candidate.json` | LLM이 쓴 새 후보. `draft_store.py commit`이 현재 초안으로 옮긴다 |
+| `drafts/<date>.json` | 현재 초안 (승인 대상). 초안 코드 = 내용 해시 앞 12자리 (무결성 확인용) |
+| `drafts/<date>.history.json` | 자동 수정 이력 원장 `autofix-ledger/1`: `original_draft`, `runs[]`(at, input/output 해시, 직전 출력과 연결 여부, status, attempts_used, before/after, changes) |
+| `drafts/versions/<date>.v<N>.json` (+ `.history.json`) | `--new-version`으로 교체된 이전 초안과 그 원장 |
 
 ## 5. 스크립트 명세 (Phase 2·4에서 구현)
 
 | 스크립트 | 입력 | 출력 | 실패 조건 |
 |---------|------|------|----------|
-| `recent_wods.py` | `--date`, `--days 7` | 기간 내 WOD 파일 목록·본문·패턴 | — |
+| `recent_wods.py` (4) | `--date`, `--days 7`, `--draft`(선택), `--wods-dir` | 기준일 이전 7일 `wods/*.json` 요약(형식·시간·동작·패턴), 동작·패턴 횟수, 같은 날짜 기록, 미래 기록 제외 목록, 반복·겹침 참고 경고, 손상·불완전 파일 경고 | 입력 오류만 2 (경고는 0) |
+| `draft_store.py` (4) | `status <date>` / `commit <date> [--candidate] [--new-version \| --keep-existing]` | 현재 초안 코드, 보존 버전 목록, 반영 결과 | 같은 날짜 초안이 있고 선택이 없으면 1 (`draft_exists`) |
 | `check_equipment.py` | 초안 JSON | 동작별 필요 장비, 미보유/금지 항목, 보유 여부·수량 미확인 "확인 필요", 필요 수량 vs 보유 수량 | 미보유·금지 동작 포함 시 종료 코드 1 |
 | `simulate.py` | 초안 JSON | ① 본운동 시간 30분 이하 여부(검증됨) ② 라운드 시간·예상 라운드/완료(추정 범위+근거, 또는 추정 불가+없는 데이터 목록) | 본운동 30분 초과, For Time인데 TC 없음, 미지원 형식이면 종료 코드 1. 시간 데이터 누락은 실패가 아님("추정 불가") |
-| `save_wod.py` | 초안 JSON 또는 텍스트, `--approved` | `wods/<date>.txt` 생성 | `--approved` 없음, 파일 이미 존재 |
-| `autofix.py` (3.5) | 초안 JSON, `--out`, `--max-attempts 3` | `status`(passed/needs_coach/unresolved/input_error), 수정 내역 `changes[]`, 검증 이력 `history[]`, 최종 초안·최종 두 보고서, 남은 문제별 `unresolved_reason`·후보 검토·운영 선택지 근거 | 남은 문제 있으면 1, 초안 구조 오류 2, `--out`이 `wods/` 안이면 2 |
+| `save_wod.py` (4) | `check <draft>` / `save <draft> --draft-code CODE(별칭 --approve) --coach-message TEXT [--accept-warnings CODE] [--replace-existing CODE]`, `--wods-dir` | check: 재검증 결과·초안 코드·경고 코드·기존 기록 코드. save: `wods/<date>.json` 원자적 생성, 경로·승인 시각·기록 코드 | 초안 코드 불일치(`draft_code_mismatch`), 재검증 오류·정확 수량 부족, 경고 미수용, 같은 날짜 기록 존재(교체 코드 없음) → 1 |
+| `autofix.py` (3.5, 4) | 초안 JSON, `--out`, `--history`(기본 `<out>.history.json`), `--max-attempts 3` | `status`(passed/needs_coach/unresolved/input_error), 수정 내역 `changes[]`, 검증 이력 `history[]`, 최종 초안·최종 두 보고서, 남은 문제별 `unresolved_reason`·후보 검토·운영 선택지 근거 | 남은 문제 있으면 1, 초안 구조 오류 2, `--out`이 `wods/` 안이면 2 |
 | `check_class.py` (3.5, 3.6) | `--total`, `--block KIND=분[:이름]`(순서대로), `--require`, `--interval KIND=라운드x운동분[/휴식분][+]`, `--wod 초안` | 블록 시간표(시작–끝), 합계, WOD 블록 vs 본운동, 인터벌 타임라인 | 합계 ≠ 수업 시간, 필수 블록 없음, WOD 블록 < 본운동, 본운동 시간 검증 실패, 인터벌 합계 ≠ 블록 시간. 복싱 블록에 인터벌이 없으면 경고 |
 | `render_wod.py` (3.6) | 초안 JSON, 수업 인자(선택), `--autofix-report`, `--check-text` | 화이트보드 텍스트(초안에서 생성. Rx 동작별 한 줄, Scale A/B/C 레벨별 한 줄, 각주), `checks[]`(item·status·source·detail), `coach_review[]`, 자동 수정 전후, 시간표 | 출력 불완전(스케일 동작 수 ≠ Rx, 스케일 없음, 미등록 동작, 스케일 한 줄의 동작 수 ≠ 초안), 검증 오류, 옮겨 쓴 텍스트에 빠진 줄 |
 
@@ -286,8 +302,8 @@ WOD - AMRAP 12
 구현 결정 (Phase 3):
 - `allowed-tools`: Read, Glob, `python3 scripts/simulate.py`, `python3 scripts/check_equipment.py` (Skill 실행 중 확인 없이 허용)
 - 초안은 Write로 `drafts/<date>.json`에 쓴다. 검증은 두 스크립트를 `--json`으로 실행하고 `exit_code`별로 처리(1 → 수정 표대로 고쳐 재검증, 최대 3회 / 2 → 초안 구조 수정).
-- `recent_wods.py`가 없는 동안은 `wods/*.txt`를 직접 읽는다. `save_wod.py`가 없는 동안은 승인을 받아도 저장하지 않고 "저장 기능 미구현"을 알린다. 두 스크립트가 생기면 Skill이 그것을 쓰도록 이미 적어 두었다.
-- 프로젝트 설정 `.claude/settings.json`: 두 검증 스크립트·단위 테스트 실행과 `drafts/**` 편집 허용, `wods/**` 직접 편집 금지(deny). 저장은 Bash로 실행하는 `save_wod.py`만 가능.
+- (Phase 4) 최근 기록은 `recent_wods.py`, 초안 반영은 `draft_store.py`, 저장은 `save_wod.py check` → 승인 → `save_wod.py save`로 한다.
+- 프로젝트 설정 `.claude/settings.json`: 검증·조회 스크립트, `save_wod.py check`, 단위 테스트 실행과 `drafts/**` 편집 허용. `save_wod.py save`는 `ask`. `wods/**` 직접 편집 금지(deny).
 
 ## 7. 구현 단계
 
@@ -297,7 +313,7 @@ WOD - AMRAP 12
 | 1 | 데이터 파일: `equipment.json`, `movements.json`, `rules.md` 스키마 확정 + 기획서에 있는 값만 입력 | 미확인 값 목록이 PROGRESS에 정리됨, 코치 확인 |
 | 2 | `simulate.py`, `check_equipment.py` + 단위 테스트 | 기획서 예시 WOD로 테스트 통과 (시간 데이터 있음/없음 두 경우 모두) |
 | 3 | `wod-planner` Skill 작성 + 최소 설정 (`.claude/settings.json`) | Skill 발견, 자연어 요청 1건으로 초안→두 검증→보고→승인 대기, `wods/` 미생성 확인 |
-| 4 | `recent_wods.py`, `save_wod.py` + 테스트 (승인 플래그, 덮어쓰기 거부) + §8.2 시나리오 S1–S6 | 테스트 통과, 시나리오 기록 |
+| 4 | `recent_wods.py`, `save_wod.py`, `draft_store.py`, autofix 이력 원장 + 테스트 (초안 코드, 재검증, 경고 수용, 덮어쓰기 거부, 초안 버전) + §8.2 시나리오 S1–S6 | ✅ 스크립트·테스트, §8.2 시나리오 S1–S6 PASS (2026-11-08, 결과는 PROGRESS "Phase 4 E2E") |
 | 5 | Post-MVP: 키즈 버전, 장비 회전, 패턴 중복 판정, 실제 결과 보정 (스케일 A/B/C·60분 수업안·자동 수정은 Phase 3.5로 앞당김) | 항목별 별도 정의 |
 
 ## 8. 테스트 방법
@@ -308,12 +324,14 @@ WOD - AMRAP 12
   - 픽스처의 테스트용 범위 값 → 라운드 시간·예상 라운드 범위 계산, 피로도 `null`이면 "피로도 미반영" 표시
   - AMRAP 35 → 실패, For Time인데 TC 없음 → 실패, EMOM 20 → 검증됨
 - `check_equipment`: 링 머슬업 → 층고 제한으로 불가, 성인 월볼 → 허용 + 타깃 높이 경고, 풀업바 12명 vs 약 8명 → 추정 수량 경고, 덤벨 10kg → 수량 미확인 경고, 로잉 5대 vs 12명 → 필요/보유 수량 표시(운영 방식은 강제하지 않음), 보유 여부·수량 `null` → 확인 필요, 픽스처의 `banned_movements` 항목 → 금지.
-- `save_wod`: `--approved` 없으면 거부, 같은 날짜 파일 존재 시 거부, 임시 디렉터리에 정상 저장.
-- `recent_wods`: 임시 디렉터리 픽스처로 7일 경계·날짜 정렬·헤더 파싱 검증.
+- `save_wod`: 초안 코드 없음·불일치·JSON 안 승인 필드만 있음 → 거부, 기록에 `agent_reported`·초안 코드가 초안만으로 계산됨(한계 문서화), 재검증 실패·정확 수량 부족 → 거부, 경고 코드 없이 경고 남음 → 거부, 승인 후 초안 변경 → 거부, 같은 날짜 기록 → 거부(기록 코드로만 교체·이전본 보존), 정상 저장 레코드 필드, 원자적 쓰기, CLI. 실제 `wods/`를 건드리지 않는지 확인.
+- `recent_wods`: 임시 디렉터리로 7일 경계·미래 제외·같은 날짜·최신순, 손상·불완전·날짜 불일치·형식 불명 파일 경고, 반복·겹침 경고(금지 아님), CLI.
+- `draft_store`: 첫 반영, 기본 덮어쓰기 거부, 동일 내용 no-op, 유지·새 버전(이전 초안·원장 보존), 날짜 불일치.
+- `autofix` 원장: 재검증 후 이전 수정·최초 초안 유지, 실행 사이 수동 변경 표시, 손상 원장 덮어쓰지 않음, `--out` 없으면 원장 없음. `render_wod`: 누적 이력 표시, 한 줄 스케일 형식 유지.
 
 테스트는 실제 `data/`·`wods/` 대신 `tests/fixtures/`와 임시 디렉터리를 사용한다.
 
-### 8.2 에이전트 시나리오 테스트 (Phase 3에서 S1 확인, 전체는 Phase 4 — 결과를 PROGRESS에 기록)
+### 8.2 에이전트 시나리오 테스트 (Phase 3에서 S1 확인, 전체는 Phase 4 — 결과를 PROGRESS에 기록, 2026-11-08 전체 PASS)
 | ID | 입력 | 기대 결과 |
 |----|------|----------|
 | S1 | 기획서 "입력 예시" 그대로 | 짐내스틱 위주 WOD, 로잉·버피와 패턴 겹침 언급, 본운동 30분 검증, 시간 데이터 없으면 "추정 불가"로 표시, 손목 회원 대체 제시, 저장 전 승인 요청 |

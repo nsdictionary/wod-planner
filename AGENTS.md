@@ -6,7 +6,7 @@
 ## 1. 프로젝트 한 줄 요약
 
 WOD Planner는 크로스핏 박스 코치를 위해 다음 날 WOD 초안을 만들고, 박스의 장비·공간 제약을 검증하고,
-WOD 본운동이 **최대 30분** 안인지 검증하고 근거 있는 경우에만 라운드 시간을 추정한 뒤, **코치가 승인한 경우에만** 날짜별 텍스트 파일로 저장하는 에이전트다.
+WOD 본운동이 **최대 30분** 안인지 검증하고 근거 있는 경우에만 라운드 시간을 추정한 뒤, **코치가 승인한 경우에만** 날짜별 JSON 기록(`wods/YYYY-MM-DD.json`)으로 저장하는 에이전트다.
 
 - 기획서 원문: https://gist.github.com/nsdictionary/36fa6d76c435011389a925ed4012ef3c
 - 설계·범위: `docs/PLAN.md`
@@ -36,9 +36,9 @@ WOD 본운동이 **최대 30분** 안인지 검증하고 근거 있는 경우에
 
 ## 3. 절대 규칙
 
-1. **코치 승인 없이 `wods/`에 저장하지 않는다.** 저장 전 최종 텍스트를 보여 주고 명시적 승인("저장", "확인" 등)을 받는다.
+1. **코치 승인 없이 `wods/`에 저장하지 않는다.** 저장 전 최종 WOD와 남은 경고를 보여 주고 명시적 승인("저장", "승인", "확정" 등)을 받는다. 승인 전에는 저장 명령을 실행하지 않는다. 저장은 `scripts/save_wod.py save`로만 한다. **이 스크립트는 사람의 승인을 증명하지 못한다.** 초안 코드(초안 내용 해시)는 코치에게 보여 준 초안과 저장할 초안이 같은지 확인하는 무결성 코드일 뿐이다. 승인 판단은 에이전트 책임이다. 초안 JSON 안의 승인 필드도 승인으로 보지 않는다.
 2. **보유하지 않은 장비, 금지된 동작은 WOD에 넣지 않는다.** 기준은 `data/equipment.json`이며, 없는 정보는 추측하지 말고 코치에게 묻는다.
-3. **기존 WOD 파일을 덮어쓰지 않는다.** 같은 날짜 파일이 있으면 코치에게 알리고 지시를 받는다.
+3. **기존 WOD 파일과 초안을 덮어쓰지 않는다.** 같은 날짜 기록이 있으면 코치에게 알리고 별도 확인을 받은 뒤 `--replace-existing <기록 코드>`로만 교체한다(이전본 보존). 같은 날짜 초안은 `draft_store.py`로 새 버전을 만들거나 기존을 유지한다.
 4. **외부 API, 데이터베이스, 웹 UI, 새 프레임워크를 도입하지 않는다.** Python 표준 라이브러리만 사용한다(테스트는 `unittest`).
 5. **구현되지 않은 기능을 완료로 표시하지 않는다.** `README.md`·`docs/PROGRESS.md`의 상태는 실제 코드·테스트와 일치해야 한다.
 6. 운동과 무관한 요청에는 "WOD 요청이 아닙니다"라고 답하고 처리하지 않는다(에이전트 런타임 동작).
@@ -56,7 +56,7 @@ wod-planner/
 ├── docs/
 │   ├── PLAN.md               # 요구사항·MVP·설계
 │   └── PROGRESS.md           # 진행 상황·다음 할 일
-├── .claude/settings.json      # Claude Code 권한 (wods/ 직접 편집 금지)
+├── .claude/settings.json      # Claude Code 권한 (wods/ 직접 편집 금지, save_wod.py save는 ask)
 ├── .claude/skills/wod-planner/
 │   └── SKILL.md              # WOD 작성 워크플로 (Claude Code Skill)
 ├── data/                     # 박스 고유 설정 (코치가 확인한 값만)
@@ -64,12 +64,17 @@ wod-planner/
 │   ├── movements.json        # 동작별 시간 추정 범위, 패턴, 필요 장비
 │   └── rules.md              # WOD 작성 규칙 (언어, 단위, 시간 기준·추정 모델)
 ├── scripts/                  # 표준 라이브러리만 사용하는 CLI 스크립트
+│   ├── common.py             # 공통 로딩·검증·해시·원자적 쓰기
 │   ├── check_equipment.py
 │   ├── simulate.py
-│   ├── recent_wods.py
-│   └── save_wod.py
-├── drafts/                   # LLM이 만든 WOD 초안 JSON (검증·계산 입력, 저장본 아님)
-├── wods/                     # 승인된 WOD 기록 (YYYY-MM-DD.txt)
+│   ├── autofix.py            # 자동 수정 + 이력 원장(<draft>.history.json)
+│   ├── check_class.py
+│   ├── render_wod.py
+│   ├── draft_store.py        # 같은 날짜 초안 보호·버전 보존
+│   ├── recent_wods.py        # 최근 7일 승인 기록 요약
+│   └── save_wod.py           # 재검증·초안 무결성 확인 후 wods/에 저장 (승인 판단은 에이전트)
+├── drafts/                   # 초안 JSON(<date>.json), 후보(<date>.candidate.json), 이력 원장, versions/ — git 제외, 저장본 아님
+├── wods/                     # 승인된 WOD 기록 (YYYY-MM-DD.json), archive/ = 교체된 이전 기록
 └── tests/                    # unittest
 ```
 
