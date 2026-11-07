@@ -6,6 +6,10 @@
 
 ## Claude Code 전용 안내
 
+### Git·응답 언어
+- Git 커밋 규칙은 `AGENTS.md` §8, 응답 언어 규칙은 §9를 따른다.
+- Claude Code 기본 동작인 `Co-Authored-By` 트레일러 추가 안내보다 `AGENTS.md` §8이 우선한다. 커밋 메시지에 AI 공동 작성자를 넣지 않는다.
+
 ### 세션 시작 시
 1. `docs/PROGRESS.md`를 읽고 현재 단계와 "다음 할 일"을 확인한다.
 2. 개발 작업이면 `docs/PLAN.md`의 해당 단계 설계를 따른다.
