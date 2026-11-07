@@ -28,6 +28,7 @@ PRECISIONS = ("exact", "approx", "unknown")
 PRECISION_LABEL = {"exact": "정확", "approx": "추정", "unknown": "미확인"}
 GROUPS = ("adult", "kids")
 UNITS = ("rep", "m")
+SCALE_LEVELS = ("A", "B", "C")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 RULES_BLOCK_RE = re.compile(r"```json[ \t]*\n(.*?)```", re.S)
 
@@ -242,6 +243,32 @@ def validate_data(data):
 
 # ---------------------------------------------------------------- WOD 초안 검증
 
+def _validate_movement_list(prefix, movements, errors):
+    for i, m in enumerate(movements):
+        p = f"{prefix}[{i}]"
+        if not isinstance(m, dict):
+            errors.append(f"{p}: 객체여야 합니다")
+            continue
+        if not isinstance(m.get("id"), str) or not m.get("id"):
+            errors.append(f"{p}.id: 필수 문자열입니다")
+        reps = m.get("reps")
+        if not is_number(reps) or reps <= 0:
+            errors.append(f"{p}.reps: 양수여야 합니다 (unit이 m인 동작은 미터)")
+        for f in ("units_per_athlete", "concurrent_athletes"):
+            if f in m and not is_positive_int(m[f]):
+                errors.append(f"{p}.{f}: 1 이상의 정수여야 합니다")
+        if "load" in m and not isinstance(m["load"], str):
+            errors.append(f"{p}.load: 문자열이어야 합니다")
+        if "weights" in m:
+            w = m["weights"]
+            if not isinstance(w, dict):
+                errors.append(f"{p}.weights: {{장비 id: [무게, ...]}} 형식이어야 합니다")
+            else:
+                for eq_id, lst in w.items():
+                    if not isinstance(lst, list) or not lst or not all(is_number(x) and x > 0 for x in lst):
+                        errors.append(f"{p}.weights.{eq_id}: 양수 무게 배열이어야 합니다")
+
+
 def validate_draft(draft):
     """초안 JSON의 구조를 검사한다. 문제가 있으면 모두 모아 InputError로 알린다.
 
@@ -268,33 +295,29 @@ def validate_draft(draft):
     if group not in GROUPS:
         errors.append(f"group: {GROUPS} 중 하나여야 합니다")
 
+    mt = draft.get("max_workout_min")
+    if mt is not None and (not is_number(mt) or mt <= 0):
+        errors.append("max_workout_min: 양수 또는 null 이어야 합니다 (코치가 요청한 본운동 상한, 분)")
+
     movements = draft.get("movements")
     if not isinstance(movements, list) or not movements:
         errors.append("movements: 동작이 1개 이상 있는 배열이어야 합니다")
         movements = []
-    for i, m in enumerate(movements):
-        p = f"movements[{i}]"
-        if not isinstance(m, dict):
-            errors.append(f"{p}: 객체여야 합니다")
-            continue
-        if not isinstance(m.get("id"), str) or not m.get("id"):
-            errors.append(f"{p}.id: 필수 문자열입니다")
-        reps = m.get("reps")
-        if not is_number(reps) or reps <= 0:
-            errors.append(f"{p}.reps: 양수여야 합니다 (unit이 m인 동작은 미터)")
-        for f in ("units_per_athlete", "concurrent_athletes"):
-            if f in m and not is_positive_int(m[f]):
-                errors.append(f"{p}.{f}: 1 이상의 정수여야 합니다")
-        if "load" in m and not isinstance(m["load"], str):
-            errors.append(f"{p}.load: 문자열이어야 합니다")
-        if "weights" in m:
-            w = m["weights"]
-            if not isinstance(w, dict):
-                errors.append(f"{p}.weights: {{장비 id: [무게, ...]}} 형식이어야 합니다")
-            else:
-                for eq_id, lst in w.items():
-                    if not isinstance(lst, list) or not lst or not all(is_number(x) and x > 0 for x in lst):
-                        errors.append(f"{p}.weights.{eq_id}: 양수 무게 배열이어야 합니다")
+    _validate_movement_list("movements", movements, errors)
+
+    scales = draft.get("scales")
+    if scales is not None:
+        if not isinstance(scales, dict) or not scales:
+            errors.append(f"scales: {{\"A\": [동작...], ...}} 형식의 객체여야 합니다 (레벨: {', '.join(SCALE_LEVELS)})")
+        else:
+            for level, lst in scales.items():
+                if level not in SCALE_LEVELS:
+                    errors.append(f"scales.{level}: 알 수 없는 스케일 레벨 (허용: {', '.join(SCALE_LEVELS)})")
+                    continue
+                if not isinstance(lst, list) or not lst:
+                    errors.append(f"scales.{level}: 동작이 1개 이상 있는 배열이어야 합니다")
+                    continue
+                _validate_movement_list(f"scales.{level}", lst, errors)
     if errors:
         raise InputError(["초안 JSON 오류:"] + [f"  - {e}" for e in errors])
     return draft
@@ -353,10 +376,10 @@ def run_cli(script, description, handler, render_text, argv=None):
     return report["exit_code"]
 
 
-def render_issues(report):
+def render_issues(report, blocking="이대로는 WOD에 쓸 수 없음"):
     lines = []
     if report["errors"]:
-        lines.append(f"오류 {len(report['errors'])}건 (이대로는 WOD에 쓸 수 없음)")
+        lines.append(f"오류 {len(report['errors'])}건 ({blocking})")
         lines += [f"  ✗ {e['message']}" for e in report["errors"]]
     if report["warnings"]:
         lines.append(f"경고 {len(report['warnings'])}건")

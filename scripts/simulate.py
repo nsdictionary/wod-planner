@@ -5,6 +5,7 @@
 두 단계를 분리해 출력한다.
   1) 본운동 시간 검증 (verified/failed): 형식과 설정 시간만으로 결정된다. 시간 데이터가 없어도 항상 수행.
      AMRAP/EMOM = duration_min, For Time = time_cap_min(필수). 상한 = rules.md workout_max_min(30분).
+     초안에 max_workout_min(코치 요청 상한, 예: "18분 이내")이 있으면 둘 중 작은 값을 적용한다.
   2) 완주 가능성 추정 (estimated/not_estimable/skipped): 근거 있는 시간 범위가 모두 있을 때만 계산.
      하나라도 없으면 계산하지 않고 누락 항목을 나열한다. 시간 값을 임의로 만들지 않는다.
 
@@ -35,9 +36,19 @@ def verify_workout_time(draft, rules):
     """→ (errors, warnings, section)"""
     errors, warnings = [], []
     fmt = draft["format"]
-    max_min = rules["workout_max_min"]
+    rules_max = rules["workout_max_min"]
     basis = rules["workout_time_basis"]
-    section = {"status": "failed", "format": fmt, "basis_field": None, "minutes": None, "max_minutes": max_min}
+    request_max = draft.get("max_workout_min")
+    # 적용 상한 = 박스 규칙 상한(30분)과 코치 요청 상한 중 작은 값
+    max_min = rules_max if request_max is None else min(rules_max, request_max)
+    section = {"status": "failed", "format": fmt, "basis_field": None, "minutes": None, "max_minutes": max_min,
+               "rules_max_minutes": rules_max, "request_max_minutes": request_max,
+               "limit_source": "request" if request_max is not None and request_max < rules_max else "rules"}
+    if request_max is not None and request_max > rules_max:
+        warnings.append(issue("request_limit_above_rules",
+                              f"요청 상한 {fmt_num(request_max)}분이 박스 상한 {fmt_num(rules_max)}분보다 커서 "
+                              f"{fmt_num(rules_max)}분을 적용합니다.",
+                              request_max_minutes=request_max, max_minutes=rules_max))
 
     if fmt not in rules["supported_formats"] or fmt not in basis:
         errors.append(issue("unsupported_format",
@@ -59,10 +70,15 @@ def verify_workout_time(draft, rules):
             errors.append(issue("time_cap_missing", "For Time은 TC(time_cap_min)가 필수입니다. TC가 없으면 30분 검증을 할 수 없습니다."))
         else:
             errors.append(issue("duration_missing", f"{FORMAT_LABEL[fmt]}은 진행 시간(duration_min)이 필수입니다."))
-    elif minutes > max_min:
+    elif minutes > rules_max:
         errors.append(issue("workout_too_long",
-                            f"본운동 {FIELD_LABEL[field]} {fmt_num(minutes)}분이 상한 {fmt_num(max_min)}분을 넘습니다.",
-                            minutes=minutes, max_minutes=max_min))
+                            f"본운동 {FIELD_LABEL[field]} {fmt_num(minutes)}분이 상한 {fmt_num(rules_max)}분을 넘습니다.",
+                            minutes=minutes, max_minutes=max_min, field=field))
+    elif minutes > max_min:
+        errors.append(issue("workout_over_request",
+                            f"본운동 {FIELD_LABEL[field]} {fmt_num(minutes)}분이 코치 요청 상한 "
+                            f"{fmt_num(max_min)}분을 넘습니다.",
+                            minutes=minutes, max_minutes=max_min, field=field))
     else:
         section["status"] = "verified"
     section["minutes"] = minutes
@@ -213,7 +229,8 @@ def render_text(report, draft):
     if v["minutes"] is not None and v["basis_field"]:
         mark = "≤" if v["minutes"] <= v["max_minutes"] else ">"
         lines.append(f"   {FORMAT_LABEL.get(v['format'], v['format'])} {FIELD_LABEL[v['basis_field']]} "
-                     f"{fmt_num(v['minutes'])}분 {mark} 상한 {fmt_num(v['max_minutes'])}분")
+                     f"{fmt_num(v['minutes'])}분 {mark} 상한 {fmt_num(v['max_minutes'])}분"
+                     f"{' (코치 요청 상한)' if v.get('limit_source') == 'request' else ''}")
 
     lines.append(f"2) 완주 가능성 추정 — {ESTIMATE_LABEL[e['status']]}")
     if e["status"] == "estimated":

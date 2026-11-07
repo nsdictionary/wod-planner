@@ -22,21 +22,21 @@
 | 라운드당 시간·TC 암산 | 본운동 30분 이하를 스크립트가 검증. 라운드 시간은 근거 있는 추정 범위로만 보여 주고, 데이터가 없으면 "추정 불가"로 표시 |
 | 화이트보드용 텍스트로 정리 | 화이트보드 형식으로 출력하고 승인을 기다림. 저장은 **코치 승인 후에만** (저장 기능은 Phase 4 예정) |
 
-범위 밖: 회원별 기록·PR 관리, TV 송출, 노션 연동, 복싱 파트 구성, 개인 PT.
-60분 전체 수업 구성(웜업·설명·쿨다운·복싱·스트렝스·악세서리 시간 배분)은 MVP 이후에 다룹니다.
+범위 밖: 회원별 기록·PR 관리, TV 송출, 노션 연동, 복싱 프로그램 설계, 개인 PT, 키즈 WOD.
+60분 수업안(준비운동·복싱 드릴·WOD·마무리)은 요청 시 **응답에만** 표시하고, 시간 합계만 스크립트로 검증합니다.
 
 ## 동작 방식
 
 - **Claude Code Skill** (`.claude/skills/wod-planner/`)이 작업 절차를 담당
 - **데이터 파일** (`data/`)에 박스 장비·동작 시간표·작성 규칙
-- **Python 스크립트** (`scripts/`, 표준 라이브러리만)가 시간 검증·장비 검증을 결정적으로 수행 (최근 기록 조회·저장 스크립트는 Phase 4 예정)
+- **Python 스크립트** (`scripts/`, 표준 라이브러리만)가 시간 검증·장비 검증·자동 수정·수업 시간 합계 검증을 결정적으로 수행 (최근 기록 조회·저장 스크립트는 Phase 4 예정)
 - **승인 게이트**: 코치가 확인하기 전에는 저장하지 않음
 
 자세한 설계는 [`docs/PLAN.md`](docs/PLAN.md)를 참고하세요.
 
 ## 현재 구현 상태
 
-**Phase 3 완료 — Claude Code에서 자연어로 WOD 초안 작성·검증까지 동작합니다. 승인 후 저장(`save_wod.py`)과 최근 기록 조회(`recent_wods.py`)는 아직 없습니다.**
+**Phase 3.6 완료 — 초안 검증 후 고칠 수 있는 문제를 스크립트가 최대 3회 자동 수정·재검증하고, 최종 화이트보드 WOD(Rx + Scale A/B/C)와 검증 요약을 초안 JSON에서 생성합니다. 60분 수업 시간과 복싱 드릴 라운드 시간도 검증합니다. 승인 후 저장(`save_wod.py`)과 최근 기록 조회(`recent_wods.py`)는 아직 없습니다.**
 
 | 기능 | 상태 |
 |------|------|
@@ -44,10 +44,14 @@
 | 장비·동작·규칙 데이터 파일 | ✅ 코치 확정 값 입력, 파싱·참조 검증 (미확인 수량은 경고 대상) |
 | 시간 검증·추정 스크립트 (`simulate.py`) | ✅ 본운동 30분 검증(AMRAP/EMOM/For Time, TC 필수). 라운드 추정은 시간 데이터가 있을 때만 — 실제 데이터는 아직 없어 "추정 불가" 출력. EMOM 추정은 미지원 |
 | 장비 제약 검증 스크립트 (`check_equipment.py`) | ✅ 미등록·미보유·금지·층고 제한 검출, 추정/미확인 수량 경고, 인원 대비 수량 비교, 월볼 타깃 경고, 대체 동작 제안 |
+| 자동 수정·재검증 (`autofix.py`) | ✅ 사용 불가 동작·시간 상한 초과·장비 부족을 한 번에 하나씩 최대 3회 수정, 매번 두 검증 재실행. 대체 동작은 장비가 충분하다는 근거가 있는 것만(정확 수량 우선), 단위가 다르면 거리 근거가 있을 때만 환산. 운영 방식(파트너·시차 출발)은 자동 적용하지 않고 동시 사용 인원 계산을 근거로 코치에게 반환 |
+| 코치 요청 본운동 상한 (`max_workout_min`) | ✅ "18분 이내" 같은 요청을 30분 상한과 함께 검증 |
+| 스케일 A/B/C (`scales`) | ✅ 스케일 동작의 사용 가능 여부 검증, Rx 대체 시 스케일에도 반영, 성인인데 없으면 경고. 스케일별 장비 수량은 인원 배분을 몰라 비교하지 않음 |
+| 60분 수업안 시간 검증 (`check_class.py`) | ✅ 블록 합계 = 수업 시간, 필수 블록, WOD 블록 ≥ 본운동, 복싱 드릴 내부 시간(`--interval boxing=4x3/1` = 3분 × 4라운드 + 휴식 1분 × 3회, 마지막 라운드 뒤 휴식 없음). 수업안 내용(준비운동·복싱 드릴)은 Skill이 응답에만 작성 |
+| 최종 출력 생성 (`render_wod.py`) | ✅ 초안 JSON → 화이트보드 텍스트(Rx·스케일 모든 동작 한 줄씩), 출력 완전성 검사, 검증 요약(passed는 코드 검사 항목만), 코치 확인 항목 분리, 자동 수정 전후 표시, 옮겨 쓴 텍스트 검사(`--check-text`) |
 | 최근 기록 조회 / 승인 후 저장 스크립트 | ⬜ 미착수 (Phase 4). 지금은 승인해도 `wods/`에 저장되지 않음 |
-| `wod-planner` Claude Code Skill | ✅ 요청 해석 → 초안(`drafts/`) → 두 스크립트 검증·자동 수정 → 보고 → 승인 대기. 저장 단계는 Phase 4 |
-| 스케일 A/B/C, 키즈 버전, 장비 회전 계산 | ⬜ MVP 이후 |
-| 60분 전체 수업 구성 | ⬜ MVP 이후 |
+| `wod-planner` Claude Code Skill | ✅ 요청 해석 → 초안(`drafts/`) → `autofix.py` 검증·자동 수정 → (요청 시) `check_class.py` → 보고 → 승인 대기. 저장 단계는 Phase 4. 새 절차의 새 세션 E2E는 미실행 |
+| 키즈 버전, 장비 회전 계산 | ⬜ MVP 이후 |
 
 최신 진행 상황: [`docs/PROGRESS.md`](docs/PROGRESS.md)
 
@@ -70,11 +74,24 @@ python3 scripts/check_equipment.py tests/fixtures/drafts/plan_example_amrap.json
 # 본운동 시간 검증 + 완주 가능성 추정
 python3 scripts/simulate.py tests/fixtures/drafts/plan_example_amrap.json
 
+# 검증 + 자동 수정 (최대 3회), 수정본을 다른 파일로
+python3 scripts/autofix.py <draft.json> --out <fixed.json>
+
+# 60분 수업 시간 배분 검증
+python3 scripts/check_class.py --total 60 --block warmup=12 --block boxing=15 --block briefing=5 \
+    --block wod=18 --block cooldown=10 --require boxing --interval boxing=4x3/1 --wod <draft.json>
+
+# 최종 출력 (화이트보드 + 검증 요약 + 코치 확인 항목)
+python3 scripts/autofix.py <draft.json> --out <draft.json> --json > autofix.json
+python3 scripts/render_wod.py <draft.json> --autofix-report autofix.json \
+    --total 60 --block warmup=12 --block boxing=15 --block briefing=5 --block wod=18 --block cooldown=10 \
+    --require boxing --interval boxing=4x3/1
+
 # 기계 판독 출력 / 다른 데이터 디렉터리
 python3 scripts/simulate.py <draft.json> --json --data-dir tests/fixtures/data
 ```
 
-종료 코드: `0` 통과(경고 가능) / `1` 규칙 위반 / `2` 입력·데이터 오류.
+종료 코드: `0` 통과(경고 가능) / `1` 규칙 위반·미해결 문제 / `2` 입력·데이터 오류.
 
 ## 개발 환경
 

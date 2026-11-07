@@ -193,3 +193,34 @@ class CliTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScaleTest(unittest.TestCase):
+    SCALES = {"A": [{"id": "hanging_knee_raise", "reps": 10}],
+              "B": [{"id": "v_up", "reps": 10}],
+              "C": [{"id": "v_up", "reps": 6}]}
+
+    def test_valid_scales_checked_without_quantity(self):
+        errors, warnings, result = run(draft([{"id": "toes_to_bar", "reps": 10}], expected_athletes=6,
+                                             scales=self.SCALES))
+        self.assertEqual(errors, [])
+        self.assertEqual(sorted(result["scales"]), ["A", "B", "C"])
+        self.assertIn("scale_quantity_not_compared", codes(warnings))
+        self.assertEqual(entry({"movements": result["scales"]["A"]}, "hanging_knee_raise", "pullup_bar")["status"],
+                         "not_compared")
+
+    def test_blocked_scale_movement_is_error_with_location(self):
+        errors, _, _ = run(draft([{"id": "toes_to_bar", "reps": 10}],
+                                 scales={"A": [{"id": "v_up", "reps": 5}, {"id": "ring_muscle_up", "reps": 3}]}))
+        self.assertEqual(codes(errors), ["space_restricted"])
+        self.assertEqual((errors[0]["scale"], errors[0]["index"]), ("A", 1))
+        self.assertTrue(errors[0]["message"].startswith("[Scale A]"))
+
+    def test_issue_index_on_main_movements(self):
+        errors, _, _ = run(draft([{"id": "box_jump", "reps": 10}, {"id": "sled_push", "reps": 20}]))
+        self.assertEqual(errors[0]["index"], 1)
+        self.assertNotIn("scale", errors[0])
+
+    def test_unknown_scale_level_is_input_error(self):
+        with self.assertRaises(support.common.InputError):
+            draft([{"id": "v_up", "reps": 5}], scales={"D": [{"id": "v_up", "reps": 5}]})

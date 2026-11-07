@@ -5,6 +5,9 @@
 오류 (종료 코드 1): 미등록 동작, 미보유 장비, 금지 동작, 층고 제한, 보유하지 않은 무게
 경고 (종료 코드 0): 보유 여부 미확인, 추정·미확인 수량, 수량 부족(가능성), 월볼 타깃 높이
 
+초안에 scales(A/B/C)가 있으면 스케일 동작도 같은 기준으로 사용 가능 여부를 검사한다(수량 비교는 안 함).
+모든 issue에는 위치 index(동작 배열 순번)와 스케일이면 scale 필드가 붙는다 (autofix.py가 사용).
+
 수량 부족은 실행 불가로 판정하지 않는다. 파트너·교대 운영이 가능할 수 있으므로
 필요 수량과 보유 수량을 보여 주고 운영 선택지를 제안만 한다.
 """
@@ -23,7 +26,8 @@ from common import (
 )
 
 SCRIPT = "check_equipment"
-SHORTAGE_OPTIONS = ["파트너(2인 1조) 교대", "시차 출발(웨이브)", "스테이션별 시작 동작 분산"]
+SHORTAGE_OPTIONS = ["파트너(2인 1조) 교대", "시차 출발(웨이브)",
+                    "스테이션별 시작 동작 분산(단독으로는 동시 사용 감소를 보장하지 않음)"]
 PRECISION_RANK = {"exact": 0, "approx": 1, "unknown": 2}
 WEIGHT_UNIT = {"by_weight_kg": "kg", "by_weight_lb": "lb"}
 
@@ -162,31 +166,32 @@ def _append_substitute_text(error, substitutes):
     error["substitutes"] = substitutes
 
 
-def check_equipment(draft, data):
-    """→ (errors, warnings, result)"""
+def _tag(issues, since, index, scale):
+    """이번 동작에서 생긴 issue에 위치(index, scale)를 붙이고, 스케일이면 메시지 앞에 레벨을 표시한다."""
+    for it in issues[since:]:
+        it.setdefault("index", index)
+        if scale is not None:
+            it.setdefault("scale", scale)
+            if not it["message"].startswith("[Scale"):
+                it["message"] = f"[Scale {scale}] " + it["message"]
+
+
+def _check_movement(m, index, data, group, concurrent_default, errors, warnings, scale=None):
+    """동작 1개 검사 → item. concurrent_default가 None이면 수량 비교를 하지 않는다."""
     eq = data["equipment"]["equipment"]
     space = data["equipment"]["space"]
     movements = data["movements"]["movements"]
-    group = draft.get("group", "adult")
-    athletes = draft.get("expected_athletes")
-    errors, warnings, items = [], [], []
-
-    if athletes is None:
-        warnings.append(issue(
-            "athletes_unknown",
-            "예상 인원(expected_athletes)이 없어 동시 사용 수량을 비교하지 못했습니다. 확인 필요."))
-
-    for m in draft["movements"]:
-        mid = m["id"]
-        info = movements.get(mid)
+    e0, w0 = len(errors), len(warnings)
+    mid = m["id"]
+    info = movements.get(mid)
+    try:
         if info is None:
             errors.append(issue(
                 "unregistered_movement",
                 f"미등록 동작 '{mid}' — data/movements.json에 없어 장비·공간을 검증할 수 없습니다. "
                 f"등록된 동작으로 바꾸거나 코치 확인 후 등록하세요.",
                 movement=mid))
-            items.append({"id": mid, "display": None, "status": "error", "equipment": [], "substitutes": []})
-            continue
+            return {"id": mid, "display": None, "status": "error", "equipment": [], "substitutes": []}
 
         display = info["display"]
         item = {"id": mid, "display": display, "status": "ok", "equipment": [], "substitutes": []}
@@ -220,10 +225,9 @@ def check_equipment(draft, data):
             # 쓸 수 없는 동작은 수량 비교를 하지 않고 대체 동작만 제안한다
             item["substitutes"] = _substitutes(info, group, data)
             _append_substitute_text(errors[-1], item["substitutes"])
-            items.append(item)
-            continue
+            return item
 
-        concurrent = m.get("concurrent_athletes", athletes)
+        concurrent = m.get("concurrent_athletes", concurrent_default) if concurrent_default is not None else None
         units = m.get("units_per_athlete", 1)
 
         for eq_id in info.get("equipment") or []:
@@ -261,9 +265,41 @@ def check_equipment(draft, data):
         if item["status"] == "error":  # 보유하지 않은 무게
             item["substitutes"] = _substitutes(info, group, data)
             _append_substitute_text(errors[-1], item["substitutes"])
-        items.append(item)
+        return item
+    finally:
+        _tag(errors, e0, index, scale)
+        _tag(warnings, w0, index, scale)
+
+
+def check_equipment(draft, data):
+    """→ (errors, warnings, result)"""
+    group = draft.get("group", "adult")
+    athletes = draft.get("expected_athletes")
+    errors, warnings, items = [], [], []
+
+    if athletes is None:
+        warnings.append(issue(
+            "athletes_unknown",
+            "예상 인원(expected_athletes)이 없어 동시 사용 수량을 비교하지 못했습니다. 확인 필요."))
+
+    for i, m in enumerate(draft["movements"]):
+        items.append(_check_movement(m, i, data, group, athletes, errors, warnings))
 
     result = {"group": group, "expected_athletes": athletes, "movements": items}
+
+    scales = draft.get("scales")
+    if scales:
+        # 스케일 동작도 쓸 수 있는지(미등록·미보유·금지·층고·무게)는 같은 기준으로 검사한다.
+        # 스케일별 인원 배분은 알 수 없으므로 수량 비교는 하지 않는다 (지어내지 않음).
+        result["scales"] = {}
+        for level in sorted(scales):
+            result["scales"][level] = [
+                _check_movement(m, i, data, group, None, errors, warnings, scale=level)
+                for i, m in enumerate(scales[level])]
+        warnings.append(issue(
+            "scale_quantity_not_compared",
+            "스케일별 인원 배분을 알 수 없어 스케일 동작의 장비 수량은 비교하지 않았습니다 "
+            "(사용 가능 여부만 검사). Rx와 장비를 나눠 쓰면 코치 확인 필요."))
     return errors, warnings, result
 
 
@@ -305,6 +341,11 @@ def render_text(report, draft):
             else:
                 detail = f" ({e['detail']})" if e.get("detail") else ""
                 lines.append(f"      {e['target']}: {STATUS_TEXT[e['status']]}{detail}")
+    for level, scale_items in (r.get("scales") or {}).items():
+        lines.append(f"Scale {level} (사용 가능 여부만 검사, 수량 비교 안 함)")
+        for it in scale_items:
+            name = it["display"] or f"{it['id']} (미등록)"
+            lines.append(f"  {'✗' if it['status'] == 'error' else '✓'} {name}")
     lines += render_issues(report)
     lines.append(render_verdict(report))
     return "\n".join(lines)

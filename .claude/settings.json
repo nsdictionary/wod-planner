@@ -4,6 +4,9 @@
       "Bash(python3 scripts/simulate.py:*)",
       "Bash(python3 scripts/check_equipment.py:*)",
       "Bash(python3 -m unittest discover -s tests:*)",
+      "Bash(python3 scripts/autofix.py:*)",
+      "Bash(python3 scripts/check_class.py:*)",
+      "Bash(python3 scripts/render_wod.py:*)",
       "Edit(drafts/**)"
     ],
     "deny": [

@@ -204,3 +204,27 @@ class CliTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RequestLimitTest(unittest.TestCase):
+    def test_request_limit_applies(self):
+        errors, _, result = run(draft([{"id": "box_jump", "reps": 15}], duration_min=20, max_workout_min=18))
+        self.assertEqual(codes(errors), ["workout_over_request"])
+        v = result["workout_time"]
+        self.assertEqual((v["max_minutes"], v["limit_source"], v["rules_max_minutes"]), (18, "request", 30))
+
+    def test_request_limit_boundary_ok(self):
+        errors, _, result = run(draft([{"id": "box_jump", "reps": 15}], duration_min=18, max_workout_min=18))
+        self.assertEqual(errors, [])
+        self.assertEqual(result["workout_time"]["status"], "verified")
+
+    def test_request_above_rules_uses_rules(self):
+        errors, warnings, result = run(draft([{"id": "box_jump", "reps": 15}], duration_min=32, max_workout_min=40))
+        self.assertEqual(codes(errors), ["workout_too_long"])
+        self.assertIn("request_limit_above_rules", codes(warnings))
+        self.assertEqual(result["workout_time"]["max_minutes"], 30)
+
+    def test_for_time_tc_against_request_limit(self):
+        d = draft([{"id": "box_jump", "reps": 15}], format="FOR_TIME", duration_min=None,
+                  time_cap_min=20, rounds=3, max_workout_min=18)
+        self.assertEqual(codes(run(d)[0]), ["workout_over_request"])
