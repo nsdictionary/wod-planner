@@ -37,4 +37,4 @@ Thumbs.db
 *.log
 tmp/
 # LLM이 만든 WOD 초안(검증·계산 입력용 중간 산출물). 승인본은 wods/에 저장되어 추적된다.
-drafts/
+/drafts/

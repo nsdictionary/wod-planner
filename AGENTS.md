@@ -56,6 +56,7 @@ wod-planner/
 ├── docs/
 │   ├── PLAN.md               # 요구사항·MVP·설계
 │   └── PROGRESS.md           # 진행 상황·다음 할 일
+├── .claude/settings.json      # Claude Code 권한 (wods/ 직접 편집 금지)
 ├── .claude/skills/wod-planner/
 │   └── SKILL.md              # WOD 작성 워크플로 (Claude Code Skill)
 ├── data/                     # 박스 고유 설정 (코치가 확인한 값만)

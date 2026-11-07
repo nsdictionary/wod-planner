@@ -1,0 +1,66 @@
+{
+  "_meta": {
+    "description": "테스트 전용 동작 데이터. time_estimate 값은 계산 검증을 위한 가상 값이며 실제 박스 기준이 아니다."
+  },
+  "movements": {
+    "toes_to_bar": {
+      "display": "Toes-to-Bar", "unit": "rep",
+      "time_estimate": {"sec_per_unit": {"low": 2, "high": 4}, "basis": "테스트용 가상 값", "updated": "2026-11-07"},
+      "patterns": ["pull"], "equipment": ["pullup_bar"], "space_tags": [],
+      "substitutes": [{"id": "hanging_knee_raise", "context": "Scale A"}, {"id": "v_up", "context": "Scale B"}]
+    },
+    "hanging_knee_raise": {
+      "display": "Hanging Knee Raises", "unit": "rep", "time_estimate": null,
+      "patterns": ["pull"], "equipment": ["pullup_bar"], "space_tags": [], "substitutes": []
+    },
+    "v_up": {
+      "display": "V-ups", "unit": "rep", "time_estimate": null,
+      "patterns": [], "equipment": [], "space_tags": [], "substitutes": []
+    },
+    "box_jump": {
+      "display": "Box Jumps", "unit": "rep",
+      "time_estimate": {"sec_per_unit": {"low": 2, "high": 3.5}, "basis": "테스트용 가상 값", "updated": "2026-11-07"},
+      "patterns": ["legs"], "equipment": ["box"], "space_tags": [], "substitutes": []
+    },
+    "shuttle_run": {
+      "display": "Shuttle Runs (15m = 1 rep)", "unit": "rep",
+      "time_estimate": {"sec_per_unit": {"low": 8, "high": 12}, "basis": "테스트용 가상 값", "updated": "2026-11-07"},
+      "patterns": ["cardio"], "equipment": [], "space_tags": [], "substitutes": []
+    },
+    "row": {
+      "display": "Row", "unit": "m",
+      "time_estimate": {"sec_per_unit": {"low": 0.2, "high": 0.3}, "basis": "테스트용 가상 값", "updated": "2026-11-07"},
+      "patterns": ["cardio"], "equipment": ["rower"], "space_tags": [], "substitutes": []
+    },
+    "wall_ball": {
+      "display": "Wall Balls", "unit": "rep", "time_estimate": null,
+      "patterns": ["legs", "push"], "equipment": ["wall_ball"], "space_tags": ["wall_target"], "substitutes": []
+    },
+    "ring_muscle_up": {
+      "display": "Ring Muscle-ups", "unit": "rep", "time_estimate": null,
+      "patterns": ["pull", "push"], "equipment": ["rings"], "space_tags": ["high_ceiling"],
+      "substitutes": [{"id": "toes_to_bar", "context": "테스트용 대체"}]
+    },
+    "sled_push": {
+      "display": "Sled Push", "unit": "m", "time_estimate": null,
+      "patterns": ["legs"], "equipment": ["sled"], "space_tags": [],
+      "substitutes": [{"id": "shuttle_run", "context": "테스트용 대체"}]
+    },
+    "bike_cal": {
+      "display": "Bike", "unit": "rep", "time_estimate": null,
+      "patterns": ["cardio"], "equipment": ["assault_bike"], "space_tags": [], "substitutes": []
+    },
+    "dumbbell_snatch": {
+      "display": "Dumbbell Snatches", "unit": "rep", "time_estimate": null,
+      "patterns": ["pull"], "equipment": ["dumbbell"], "space_tags": [], "substitutes": []
+    },
+    "kettlebell_swing": {
+      "display": "Kettlebell Swings", "unit": "rep", "time_estimate": null,
+      "patterns": ["pull"], "equipment": ["kettlebell"], "space_tags": [], "substitutes": []
+    },
+    "handstand_walk": {
+      "display": "Handstand Walk", "unit": "m", "time_estimate": null,
+      "patterns": ["push"], "equipment": [], "space_tags": [], "substitutes": [{"id": "v_up", "context": "테스트용 대체"}]
+    }
+  }
+}

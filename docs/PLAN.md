@@ -196,6 +196,15 @@
   "notes": ["손목 아픈 회원: Toes-to-Bar → V-ups"]
 }
 ```
+선택 필드 (Phase 2에서 추가, 없으면 기본값):
+- `group`: `adult`(기본) / `kids` — `banned_movements`의 그룹 판정에 사용
+- `movements[].weights`: `{"dumbbell": [15, 10]}`처럼 장비별 무게 목록. 단위는 데이터 키를 따른다(덤벨·케틀벨 kg, 바벨 lb)
+- `movements[].units_per_athlete`: 1인당 장비 개수 (기본 1, 예: 덤벨 2개)
+- `movements[].concurrent_athletes`: 이 동작을 동시에 하는 인원 (기본 `expected_athletes`, 파트너 WOD 등)
+- `unit`이 `m`인 동작은 `reps`가 미터다 (예: Row 250)
+
+구조 오류(타입·필수 필드)는 `scripts/common.py`가 모두 모아 종료 코드 2로 알린다.
+
 MVP 지원 형식: `AMRAP`(`duration_min`), `EMOM`(`duration_min`), `FOR_TIME`(`rounds` + `time_cap_min` 필수).
 EMOM은 본운동 시간 검증만 하고, 분당 작업량 추정은 Post-MVP.
 
@@ -214,7 +223,7 @@ WOD - AMRAP 12
 ...
 ```
 
-## 5. 스크립트 명세 (Phase 2–3에서 구현)
+## 5. 스크립트 명세 (Phase 2·4에서 구현)
 
 | 스크립트 | 입력 | 출력 | 실패 조건 |
 |---------|------|------|----------|
@@ -223,7 +232,22 @@ WOD - AMRAP 12
 | `simulate.py` | 초안 JSON | ① 본운동 시간 30분 이하 여부(검증됨) ② 라운드 시간·예상 라운드/완료(추정 범위+근거, 또는 추정 불가+없는 데이터 목록) | 본운동 30분 초과, For Time인데 TC 없음, 미지원 형식이면 종료 코드 1. 시간 데이터 누락은 실패가 아님("추정 불가") |
 | `save_wod.py` | 초안 JSON 또는 텍스트, `--approved` | `wods/<date>.txt` 생성 | `--approved` 없음, 파일 이미 존재 |
 
-공통: `--json` 옵션으로 기계 판독 출력, 기본은 한국어 사람용 출력.
+공통: `--json` 옵션으로 기계 판독 출력, 기본은 한국어 사람용 출력. `--data-dir`로 데이터 디렉터리 교체.
+
+**종료 코드 (Phase 2 확정):** `0` 통과(경고 가능) / `1` 규칙 위반 / `2` 입력·데이터 오류(파일 없음, JSON 파싱, 스키마).
+
+**JSON 출력 형식 (Phase 2 확정):**
+```json
+{"script": "simulate", "ok": true, "exit_code": 0,
+ "errors": [{"code": "...", "message": "..."}], "warnings": [], "result": {}}
+```
+
+**`check_equipment.py` 판정 (Phase 2 확정):**
+- 오류: 미등록 동작, 미보유 장비, 금지 동작(그룹별), 층고 제한, 보유하지 않은 무게 → 대체 동작 제안(대체 후보도 같은 검사를 통과한 것만)
+- 경고: 보유 여부 미확인, `approx`/`unknown` 수량, 무게 미지정, 월볼 타깃 높이
+- 수량: 필요 = 동시 인원 × 1인당 개수(전원 동시 출발 가정). 부족해도 **오류가 아님** — 경고 + 운영 선택지(파트너 교대, 시차 출발, 시작 동작 분산)
+- 공간 수용 인원: `space.<동작 id>.capacity_athletes`가 있으면 비교 (현재 `shuttle_run`)
+- 오류로 쓸 수 없는 동작은 수량 비교를 생략
 
 ### 시간 계산 모델 (MVP)
 1. **본운동 검증 (항상 수행, 검증됨):** 본운동 시간 = AMRAP/EMOM `duration_min`, For Time `time_cap_min`. `workout_max_min`(30) 초과 시 실패.
@@ -235,13 +259,19 @@ WOD - AMRAP 12
 3. **추정 불가:** 해당 WOD 동작 중 하나라도 `time_estimate`가 없거나 `transition_sec_range`가 없으면 2를 건너뛰고 없는 항목을 나열한다.
 4. 웜업·설명·쿨다운과 60분 수업 전체 타임라인은 계산하지 않는다 (Post-MVP).
 
-## 6. Skill 설계 (Phase 4)
+## 6. Skill 설계 (Phase 3 — 구현됨)
 
-`.claude/skills/wod-planner/SKILL.md`
+`.claude/skills/wod-planner/SKILL.md` (실제 절차는 이 파일이 기준)
 - **frontmatter description:** 코치가 다음 날 WOD 작성·수정·저장을 요청할 때 사용. 무관한 요청에는 사용하지 않음.
 - **본문 절차:** §3의 ①–⑧. 각 단계에서 실행할 명령과 실패 시 행동(대체 동작 제안, 코치에게 질문)을 명시.
 - **출력 템플릿:** 기획서 "결과물 예시" 형식 (WOD / Scale / [시뮬레이션]).
 - **금지:** 승인 없는 저장, 스크립트 결과 없이 숫자 제시, 추정 불가인 시간을 지어내기, `data/`에 없는 장비 사용.
+
+구현 결정 (Phase 3):
+- `allowed-tools`: Read, Glob, `python3 scripts/simulate.py`, `python3 scripts/check_equipment.py` (Skill 실행 중 확인 없이 허용)
+- 초안은 Write로 `drafts/<date>.json`에 쓴다. 검증은 두 스크립트를 `--json`으로 실행하고 `exit_code`별로 처리(1 → 수정 표대로 고쳐 재검증, 최대 3회 / 2 → 초안 구조 수정).
+- `recent_wods.py`가 없는 동안은 `wods/*.txt`를 직접 읽는다. `save_wod.py`가 없는 동안은 승인을 받아도 저장하지 않고 "저장 기능 미구현"을 알린다. 두 스크립트가 생기면 Skill이 그것을 쓰도록 이미 적어 두었다.
+- 프로젝트 설정 `.claude/settings.json`: 두 검증 스크립트·단위 테스트 실행과 `drafts/**` 편집 허용, `wods/**` 직접 편집 금지(deny). 저장은 Bash로 실행하는 `save_wod.py`만 가능.
 
 ## 7. 구현 단계
 
@@ -250,8 +280,8 @@ WOD - AMRAP 12
 | 0 | 설계 문서 | AGENTS/CLAUDE/PLAN/PROGRESS/README 작성 |
 | 1 | 데이터 파일: `equipment.json`, `movements.json`, `rules.md` 스키마 확정 + 기획서에 있는 값만 입력 | 미확인 값 목록이 PROGRESS에 정리됨, 코치 확인 |
 | 2 | `simulate.py`, `check_equipment.py` + 단위 테스트 | 기획서 예시 WOD로 테스트 통과 (시간 데이터 있음/없음 두 경우 모두) |
-| 3 | `recent_wods.py`, `save_wod.py` + 테스트 (승인 플래그, 덮어쓰기 거부) | 테스트 통과 |
-| 4 | `wod-planner` Skill 작성, 시나리오 수동 테스트 | §8 시나리오 S1–S6 통과 기록 |
+| 3 | `wod-planner` Skill 작성 + 최소 설정 (`.claude/settings.json`) | Skill 발견, 자연어 요청 1건으로 초안→두 검증→보고→승인 대기, `wods/` 미생성 확인 |
+| 4 | `recent_wods.py`, `save_wod.py` + 테스트 (승인 플래그, 덮어쓰기 거부) + §8.2 시나리오 S1–S6 | 테스트 통과, 시나리오 기록 |
 | 5 | Post-MVP: 스케일 A/B/C, 키즈 버전, 장비 회전, 패턴 중복 판정, 실제 결과 보정, 60분 전체 수업 구성 | 항목별 별도 정의 |
 
 ## 8. 테스트 방법
@@ -267,7 +297,7 @@ WOD - AMRAP 12
 
 테스트는 실제 `data/`·`wods/` 대신 `tests/fixtures/`와 임시 디렉터리를 사용한다.
 
-### 8.2 에이전트 시나리오 테스트 (Phase 4, 수동 — 결과를 PROGRESS에 기록)
+### 8.2 에이전트 시나리오 테스트 (Phase 3에서 S1 확인, 전체는 Phase 4 — 결과를 PROGRESS에 기록)
 | ID | 입력 | 기대 결과 |
 |----|------|----------|
 | S1 | 기획서 "입력 예시" 그대로 | 짐내스틱 위주 WOD, 로잉·버피와 패턴 겹침 언급, 본운동 30분 검증, 시간 데이터 없으면 "추정 불가"로 표시, 손목 회원 대체 제시, 저장 전 승인 요청 |

@@ -1,0 +1,35 @@
+{
+  "_meta": {
+    "description": "테스트 전용 장비 데이터. 실제 박스 값이 아니다. 구조는 data/equipment.json과 같다.",
+    "note": "sled(미보유), assault_bike(보유 여부 미확인), kids 금지 동작은 테스트용으로만 존재"
+  },
+  "equipment": {
+    "rower": {"available": true, "count": {"value": 5, "precision": "exact"}},
+    "box": {"available": true, "count": {"value": 9, "precision": "exact"}, "heights_in": [20, 24]},
+    "pullup_bar": {"available": true, "capacity_athletes": {"value": 8, "precision": "approx"}},
+    "dumbbell": {
+      "available": true,
+      "by_weight_kg": {
+        "5":  {"value": 2, "precision": "exact"},
+        "10": {"value": null, "precision": "unknown"},
+        "15": {"value": 6, "precision": "exact"},
+        "20": {"value": 4, "precision": "approx"}
+      }
+    },
+    "barbell": {"available": true, "by_weight_lb": {"45": {"value": 9, "precision": "exact"}, "35": {"value": 5, "precision": "exact"}}},
+    "wall_ball": {"available": true, "count": {"value": 20, "precision": "approx"}, "weights": null},
+    "rings": {"available": true, "count": {"value": null, "precision": "unknown"}},
+    "kettlebell": {"available": true, "by_weight_kg": null, "count": {"value": null, "precision": "unknown"}},
+    "sled": {"available": false, "count": {"value": 0, "precision": "exact"}},
+    "assault_bike": {"available": null, "count": null}
+  },
+  "banned_movements": [
+    {"movement": "handstand_walk", "groups": ["kids"], "reason": "테스트용 키즈 금지"}
+  ],
+  "space": {
+    "ceiling": {"height_m": null, "is_low": true, "restricted_space_tags": ["high_ceiling"]},
+    "wall_target": {"height_m": {"value": 2.3, "precision": "approx"}, "standard_target_available": false},
+    "shuttle_run": {"one_way_m": 7.5, "rep_distance_m": 15, "capacity_athletes": {"value": 8, "precision": "approx"}}
+  },
+  "operational_examples": []
+}

@@ -11,7 +11,8 @@
 2. 개발 작업이면 `docs/PLAN.md`의 해당 단계 설계를 따른다.
 
 ### Skill
-- WOD 작성 워크플로는 Skill로 제공한다: `.claude/skills/wod-planner/SKILL.md` (**아직 미구현** — Phase 4)
+- WOD 작성 워크플로는 Skill로 제공한다: `.claude/skills/wod-planner/SKILL.md` (Phase 3 구현. 저장 단계는 `save_wod.py` 구현 전까지 동작하지 않음)
+- 프로젝트 권한 설정: `.claude/settings.json` — 검증 스크립트·`drafts/` 편집 허용, `wods/` 직접 편집 금지
 - 코치가 "내일 WOD 짜줘" 같은 요청을 하면 이 Skill을 사용한다.
 - Skill은 절차와 판단 기준만 담고, 계산·검증·저장은 `scripts/`를 Bash로 실행해 처리한다.
 - 박스 고유 정보(장비, 규칙, 동작 시간표)는 Skill 본문에 복사하지 않고 `data/` 파일을 읽게 한다. 데이터가 바뀌어도 Skill을 고칠 필요가 없게 하기 위함이다.

@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-10",
+  "class_time": "18:30",
+  "expected_athletes": 12,
+  "group": "adult",
+  "format": "AMRAP",
+  "duration_min": 12,
+  "time_cap_min": null,
+  "rounds": null,
+  "movements": [
+    {"id": "toes_to_bar", "reps": 10},
+    {"id": "box_jump", "reps": 15, "load": "24/20 in"},
+    {"id": "shuttle_run", "reps": 20}
+  ],
+  "notes": ["기획서 결과물 예시 WOD", "손목 아픈 회원: Toes-to-Bar → V-ups"]
+}
